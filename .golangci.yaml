@@ -1,0 +1,35 @@
+version: "2"
+run:
+  allow-parallel-runners: true
+  go: "1.24"
+formatters:
+  enable:
+    - gofumpt
+
+linters:
+  enable:
+    - gocritic
+    - gosec
+    - revive
+    - errchkjson
+    - misspell
+    - promlinter
+    - importas
+  disable:
+    - godot
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -ST1000
+        - -U1000
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      severity: warning
+      confidence: 0.8
+      rules:
+        - name: dot-imports
+          disabled: true
