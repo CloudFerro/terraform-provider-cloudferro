@@ -10,15 +10,25 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: gitlab.cloudferro.com/*
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Unshallow
         run: git fetch --prune --unshallow
+
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.GITLAB_MK8S_TOKEN }}
+        run: git config --global url."https://oauth:${TOKEN}@gitlab.cloudferro.com".insteadOf "https://gitlab.cloudferro.com"
 
       - name: Set up Go
         uses: actions/setup-go@v5
