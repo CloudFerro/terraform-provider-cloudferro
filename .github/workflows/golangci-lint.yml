@@ -9,9 +9,16 @@ jobs:
   golangci-lint:
     name: Lint
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: gitlab.cloudferro.com/*
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure git for private modules
+        env:
+          TOKEN: ${{ secrets.GITLAB_MK8S_TOKEN }}
+        run: git config --global url."https://oauth:${TOKEN}@gitlab.cloudferro.com".insteadOf "https://gitlab.cloudferro.com"
 
       - name: Setup Go
         uses: actions/setup-go@v5
