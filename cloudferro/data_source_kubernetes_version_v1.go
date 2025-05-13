@@ -3,8 +3,10 @@ package cloudferro
 import (
 	"context"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversion/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
@@ -142,6 +144,9 @@ func (m *kubernetesVersionDataSource) Schema(
 			"id": schema.StringAttribute{
 				Computed: true, Optional: true,
 				Description: "Internal version id.",
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(uuidRegex, "must be valid uuid"),
+				},
 			},
 			"version": schema.StringAttribute{
 				Computed: true, Optional: true,

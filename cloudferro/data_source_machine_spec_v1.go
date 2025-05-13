@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"gitlab.cloudferro.com/k8s/api/machinespec/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
@@ -157,6 +159,9 @@ func (m *machineSpecDataSource) Schema(
 			"id": schema.StringAttribute{
 				Computed: true, Optional: true,
 				Description: "Internal of of the machine specification.",
+				Validators: []validator.String{
+					stringvalidator.RegexMatches(uuidRegex, "must be valid uuid"),
+				},
 			},
 			"name": schema.StringAttribute{
 				Computed: true, Optional: true,

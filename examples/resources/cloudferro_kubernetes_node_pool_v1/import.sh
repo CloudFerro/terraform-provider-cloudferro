@@ -1,0 +1,2 @@
+
+terraform import cloudferro_kubernetes_node_pool_v1.example cluster_id/node_pool_id

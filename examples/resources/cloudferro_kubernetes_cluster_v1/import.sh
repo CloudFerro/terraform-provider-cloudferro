@@ -1,0 +1,3 @@
+
+
+terraform import cloudferro_kubernetes_cluster_v1.example cluster_id
