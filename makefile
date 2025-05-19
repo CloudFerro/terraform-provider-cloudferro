@@ -3,10 +3,13 @@ GOFMT_FILES?=$$(find . -name '*.go')
 WEBSITE_REPO=github.com/cloudferro/terraform-provider-cloudferro
 PKG_NAME=cloudferro
 
-default: build
+default: generate build
 
-build: fmtcheck
+build: fmtcheck 
 	go install
+
+generate:
+	go generate .
 
 test: fmtcheck
 	go test -i $(TEST) || exit 1

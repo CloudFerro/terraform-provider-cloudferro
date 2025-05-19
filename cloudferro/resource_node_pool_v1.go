@@ -7,10 +7,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/hashicorp/terraform-plugin-framework-validators/int32validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
@@ -28,9 +31,10 @@ import (
 )
 
 var (
-	_ resource.Resource                = (*nodePoolResource)(nil)
-	_ resource.ResourceWithConfigure   = (*nodePoolResource)(nil)
-	_ resource.ResourceWithImportState = (*nodePoolResource)(nil)
+	_ resource.Resource                     = (*nodePoolResource)(nil)
+	_ resource.ResourceWithConfigure        = (*nodePoolResource)(nil)
+	_ resource.ResourceWithImportState      = (*nodePoolResource)(nil)
+	_ resource.ResourceWithConfigValidators = (*nodePoolResource)(nil)
 )
 
 func newNodePoolResource() resource.Resource {
@@ -65,6 +69,17 @@ type nodePoolModel struct {
 
 type nodePoolResource struct {
 	cli *grpc.ClientConn
+}
+
+// ConfigValidators implements resource.ResourceWithConfigValidators.
+func (c *nodePoolResource) ConfigValidators(context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.AtLeastOneOf(
+			path.MatchRoot("size"),
+			path.MatchRoot("size_min"),
+			path.MatchRoot("size_max"),
+		),
+	}
 }
 
 // ImportState implements resource.ResourceWithImportState.
@@ -506,14 +521,30 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 			"size": schema.Int32Attribute{
 				Description: "Size of the static node pool.",
 				Optional:    true,
+				Validators: []validator.Int32{
+					int32validator.ConflictsWith(
+						path.MatchRelative().AtParent().AtName("size_min"),
+						path.MatchRelative().AtParent().AtName("size_max"),
+					),
+				},
 			},
 			"size_min": schema.Int32Attribute{
 				Description: "Minimum size of the node pool when autoscale is turn on.",
 				Optional:    true,
+				Validators: []validator.Int32{
+					int32validator.AlsoRequires(
+						path.MatchRelative().AtParent().AtName("size_max"),
+					),
+				},
 			},
 			"size_max": schema.Int32Attribute{
 				Description: "Maximum size of the node pool when autoscale is turn on.",
 				Optional:    true,
+				Validators: []validator.Int32{
+					int32validator.AlsoRequires(
+						path.MatchRelative().AtParent().AtName("size_min"),
+					),
+				},
 			},
 			"shared_networks": schema.ListAttribute{
 				Description:   "A list of network ids that should be attached to the nodes in the node pool.",
