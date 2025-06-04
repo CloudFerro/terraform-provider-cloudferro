@@ -37,3 +37,9 @@ test-compile:
 	go test -c $(TEST) $(TESTARGS)
 
 .PHONY: build test testacc lint fmt fmtcheck test-compile
+
+dev-install:
+	rm ~/go/bin/terraform-provider-cloudferro || true
+	go build .
+	mkdir -p /tmp/tf-workaround/registry.terraform.io/cloudferro/cloudferro/0.0.1/darwin_arm64
+	cp terraform-provider-cloudferro /tmp/tf-workaround/registry.terraform.io/cloudferro/cloudferro/0.0.1/darwin_arm64/terraform-provider-cloudferro_v0.0.1

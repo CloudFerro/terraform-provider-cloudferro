@@ -23,7 +23,8 @@ func newKubernetesVersionDataSource() datasource.DataSource {
 }
 
 type kubernetesVersionDataSource struct {
-	cli *grpc.ClientConn
+	cli    *grpc.ClientConn
+	region string
 }
 
 // Configure implements datasource.DataSourceWithConfigure.
@@ -42,6 +43,7 @@ func (m *kubernetesVersionDataSource) Configure(
 	}
 
 	m.cli = state.Cli
+	m.region = state.Region
 }
 
 // Metadata implements datasource.DataSource.
@@ -80,6 +82,7 @@ func (m *kubernetesVersionDataSource) Read(
 
 		xTrue := true
 		items, err := cli.List(c, &kubernetesversionservice.ListRequest{
+			Region:   &m.region,
 			IsActive: &xTrue,
 		})
 		if err != nil {
@@ -102,6 +105,7 @@ func (m *kubernetesVersionDataSource) Read(
 
 		xTrue := true
 		items, err := cli.List(c, &kubernetesversionservice.ListRequest{
+			Region:   &m.region,
 			Version:  state.Version.ValueStringPointer(),
 			IsActive: &xTrue,
 		})

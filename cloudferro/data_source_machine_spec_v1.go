@@ -24,7 +24,8 @@ func newMachineSpecDataSource() datasource.DataSource {
 }
 
 type machineSpecDataSource struct {
-	cli *grpc.ClientConn
+	cli    *grpc.ClientConn
+	region string
 }
 
 // Configure implements datasource.DataSourceWithConfigure.
@@ -44,6 +45,7 @@ func (m *machineSpecDataSource) Configure(
 	}
 
 	m.cli = state.Cli
+	m.region = state.Region
 }
 
 // Metadata implements datasource.DataSource.
@@ -65,7 +67,6 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 
 	id := state.ID.ValueString()
 	name := state.Name.ValueString()
-	region := state.Region.ValueString()
 
 	// fix the check
 	// must provide either id and no name/region
@@ -73,8 +74,8 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 
 	var result *machinespec.MachineSpec
 	if id != "" {
-		if name != "" || region != "" {
-			resp.Diagnostics.AddWarning("failed to read machine spec", "provided name or region with id, using id")
+		if name != "" {
+			resp.Diagnostics.AddWarning("failed to read machine spec", "provided name with id, using id")
 		}
 
 		cli := machinespecservice.NewMachineSpecClient(m.cli)
@@ -88,7 +89,7 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 			return
 		}
 
-		for _, sp := range specs.Items {
+		for _, sp := range specs.GetItems() {
 			if sp.Id == id {
 				result = sp
 				break
@@ -103,15 +104,15 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 		}
 
 	} else {
-		if name == "" || region == "" {
-			resp.Diagnostics.AddError("failed to read machine spec", "name or region is missing")
+		if name == "" {
+			resp.Diagnostics.AddError("failed to read machine spec", "name is missing")
 			return
 		}
 
 		cli := machinespecservice.NewMachineSpecClient(m.cli)
 
 		specs, err := cli.List(c, &machinespecservice.ListRequest{
-			Region: state.Region.ValueStringPointer(),
+			Region: &m.region,
 			Name:   state.Name.ValueStringPointer(),
 		})
 		if err != nil {
@@ -119,19 +120,18 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 			return
 		}
 
-		if len(specs.Items) != 1 {
+		if len(specs.GetItems()) != 1 {
 			resp.Diagnostics.AddError(
 				"failed to read machine spec",
-				fmt.Sprintf("machine spec with name = %s and region = %s not found", state.Name, state.Region),
+				fmt.Sprintf("machine spec with name = %s", state.Name),
 			)
 		}
 
-		result = specs.Items[0]
+		result = specs.GetItems()[0]
 	}
 
 	state.ID = types.StringValue(result.Id)
 	state.Name = types.StringValue(result.Name)
-	state.Region = types.StringValue(result.Region)
 	state.CPU = types.Int32Value(result.Cpu)
 	state.Memory = types.Int64Value(result.Memory)
 	state.LocalDiskSize = types.Int64Value(result.LocalDiskSize)
@@ -142,7 +142,6 @@ func (m *machineSpecDataSource) Read(c context.Context, req datasource.ReadReque
 type machineSpecModel struct {
 	ID            types.String `tfsdk:"id"`
 	Name          types.String `tfsdk:"name"`
-	Region        types.String `tfsdk:"region"`
 	CPU           types.Int32  `tfsdk:"cpu"`
 	Memory        types.Int64  `tfsdk:"memory"`
 	LocalDiskSize types.Int64  `tfsdk:"local_disk_size"`
@@ -166,10 +165,6 @@ func (m *machineSpecDataSource) Schema(
 			"name": schema.StringAttribute{
 				Computed: true, Optional: true,
 				Description: "Name of the machine specification/flavor.",
-			},
-			"region": schema.StringAttribute{
-				Computed: true, Optional: true,
-				Description: "Region name.",
 			},
 			"cpu": schema.Int32Attribute{
 				Computed:    true,

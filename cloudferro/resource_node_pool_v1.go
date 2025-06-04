@@ -23,6 +23,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
+	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepool/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepoolservice/v1"
 	"google.golang.org/grpc"
@@ -57,7 +59,7 @@ type nodePoolModel struct {
 	ID             types.String `tfsdk:"id"`
 	Status         types.String `tfsdk:"-"`
 	Name           types.String `tfsdk:"name"`
-	MachineSpecID  types.String `tfsdk:"machine_spec_id"`
+	Flavor         types.String `tfsdk:"flavor"`
 	Autoscale      types.Bool   `tfsdk:"autoscale"`
 	Size           types.Int32  `tfsdk:"size"`
 	SizeMin        types.Int32  `tfsdk:"size_min"`
@@ -68,7 +70,8 @@ type nodePoolModel struct {
 }
 
 type nodePoolResource struct {
-	cli *grpc.ClientConn
+	cli    *grpc.ClientConn
+	region string
 }
 
 // ConfigValidators implements resource.ResourceWithConfigValidators.
@@ -114,6 +117,21 @@ func (c *nodePoolResource) ImportState(
 	state.ClusterID = types.StringValue(parts[0])
 	state.ID = types.StringValue(parts[1])
 
+	clusterCli := clusterservice.NewClusterClient(c.cli)
+
+	cluster, err := clusterCli.GetCluster(ctx, &clusterservice.GetClusterRequest{
+		ClusterId: state.ClusterID.ValueString(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to import node pool state", err.Error())
+		return
+	}
+
+	if cluster.GetControlPlane().GetCustom().GetMachineSpec().GetRegion() != c.region {
+		resp.Diagnostics.AddError("failed to import node pool state", "invalid region, cluster region differs from the region in the provider.")
+		return
+	}
+
 	resp.Diagnostics.Append(refreshNodePoolState(ctx, c.cli, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -141,6 +159,7 @@ func (c *nodePoolResource) Configure(
 		return
 	}
 	c.cli = state.Cli
+	c.region = state.Region
 }
 
 func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *nodePoolModel) diag.Diagnostics {
@@ -161,7 +180,7 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	}
 
 	state.Status = types.StringValue(nodePool.GetStatus())
-	state.MachineSpecID = types.StringValue(nodePool.GetMachineSpec().GetId())
+	state.Flavor = types.StringValue(nodePool.GetMachineSpec().GetName())
 	state.Name = types.StringValue(nodePool.GetName())
 	state.Autoscale = types.BoolValue(nodePool.GetAutoscale())
 	state.Size = types.Int32PointerValue(nodePool.Size)
@@ -252,7 +271,8 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 
 	clusterID := state.ClusterID.ValueString()
 
-	cli := nodepoolservice.NewNodePoolClient(c.cli)
+	npCli := nodepoolservice.NewNodePoolClient(c.cli)
+	msCli := machinespecservice.NewMachineSpecClient(c.cli)
 
 	var sharedNetworks []string
 	var labels []*nodepool.Label
@@ -305,11 +325,25 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 		}
 	}
 
-	result, err := cli.CreateNodePool(ctx, &nodepoolservice.CreateNodePoolRequest{
+	machineSpecs, err := msCli.List(ctx, &machinespecservice.ListRequest{
+		Region: &c.region,
+		Name:   state.Flavor.ValueStringPointer(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to create node pool", err.Error())
+		return
+	}
+
+	if len(machineSpecs.Items) != 1 {
+		resp.Diagnostics.AddError("failde to create node pool", "flavor not found")
+		return
+	}
+
+	result, err := npCli.CreateNodePool(ctx, &nodepoolservice.CreateNodePoolRequest{
 		ClusterId: clusterID,
 		NodePool: &nodepoolservice.NodePoolCreate{
 			MachineSpec: &nodepoolservice.NodePoolCreate_MachineSpec{
-				Id: state.MachineSpecID.ValueString(),
+				Id: machineSpecs.GetItems()[0].GetId(),
 			},
 			Name:           state.Name.ValueStringPointer(),
 			Size:           state.Size.ValueInt32Pointer(),
@@ -504,13 +538,10 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 					),
 				},
 			},
-			"machine_spec_id": schema.StringAttribute{
+			"flavor": schema.StringAttribute{
 				Required:      true,
 				PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()},
-				Description:   "Id of the machine flavor.",
-				Validators: []validator.String{
-					stringvalidator.RegexMatches(uuidRegex, "must be valid uuid"),
-				},
+				Description:   "Machine flavor.",
 			},
 			"autoscale": schema.BoolAttribute{
 				Description: "Should node pool autoscale based on the usage? If set size_min and size_max must also be provided.",

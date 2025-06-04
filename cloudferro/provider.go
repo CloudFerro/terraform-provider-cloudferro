@@ -4,8 +4,10 @@ import (
 	"context"
 	"crypto/x509"
 	"fmt"
+	"os"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -33,7 +35,8 @@ func (t tokenAuth) RequireTransportSecurity() bool {
 }
 
 type providerState struct {
-	Cli *grpc.ClientConn
+	Cli    *grpc.ClientConn
+	Region string
 }
 
 var _ provider.Provider = (*CloudFerroProvider)(nil)
@@ -50,6 +53,7 @@ type cloudFerroConfigModel struct {
 	Host       types.String `tfsdk:"host"`
 	ServerCert types.String `tfsdk:"server_cert"`
 	Token      types.String `tfsdk:"token"`
+	Region     types.String `tfsdk:"region"`
 }
 
 type CloudFerroProvider struct {
@@ -66,11 +70,93 @@ func (m *CloudFerroProvider) Configure(
 		return
 	}
 
-	// check if value are known and stuff
+	if config.Host.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("host"),
+			"Unknown CloudFerro API Host",
+			"The provider cannot create the CloudFerro API client as there is an unknown configuration value "+
+				"for the CloudFerro API host. Either target apply the source of the value first, set the value statically "+
+				"in the configuration, or use the CLOUDFERRO_HOST environment variable",
+		)
+	}
 
-	host := config.Host.ValueString()
-	token := config.Token.ValueString()
-	cert := config.ServerCert.ValueString()
+	if config.Token.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("token"),
+			"Unknown CloudFerro API Token",
+			"The provider cannot create the CloudFerro API client as there is an unknown configuration value "+
+				"for the CloudFerro API token. Either target apply the source of the value first, set the value statically "+
+				"in the configuration, or use the CLOUDFERRO_TOKEN environment variable",
+		)
+	}
+
+	if config.Region.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("region"),
+			"Unknown CloudFerro API Region",
+			"The provider cannot create the CloudFerro API client as there is an unknown configuration value "+
+				"for the CloudFerro API region. Either target apply the source of the value first, set the value statically "+
+				"in the configuration, or use the CLOUDFERRO_REGION environment variable",
+		)
+	}
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	host := os.Getenv("CLOUDFERRO_HOST")
+	token := os.Getenv("CLOUDFERRO_TOKEN")
+	region := os.Getenv("CLOUDFERRO_REGION")
+
+	cert := os.Getenv("CLOUDFERRO_CERT")
+
+	if !config.Host.IsNull() {
+		host = config.Host.ValueString()
+	}
+
+	if !config.Token.IsNull() {
+		token = config.Token.ValueString()
+	}
+
+	if !config.Region.IsNull() {
+		region = config.Region.ValueString()
+	}
+
+	if !config.ServerCert.IsNull() {
+		cert = config.ServerCert.ValueString()
+	}
+
+	if host == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("host"),
+			"Missing CloudFerro API Host",
+			"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API host. "+
+				"Set the host value in the configuration or use the CLOUDFERRO_HOST environment variable. "+
+				"If either is already set, ensure the value is not empty.",
+		)
+	}
+	if token == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("token"),
+			"Missing CloudFerro API Token",
+			"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API token. "+
+				"Set the host value in the configuration or use the CLOUDFERRO_TOKEN environment variable. "+
+				"If either is already set, ensure the value is not empty.",
+		)
+	}
+	if region == "" {
+		resp.Diagnostics.AddAttributeError(
+			path.Root("region"),
+			"Missing CloudFerro API Region",
+			"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API region. "+
+				"Set the host value in the configuration or use the CLOUDFERRO_REGION environment variable. "+
+				"If either is already set, ensure the value is not empty.",
+		)
+	}
+
+	if resp.Diagnostics.HasError() {
+		return
+	}
 
 	var err error
 	var creds credentials.TransportCredentials
@@ -78,14 +164,14 @@ func (m *CloudFerroProvider) Configure(
 	if cert != "" {
 		creds, err = credentials.NewClientTLSFromFile(cert, "")
 		if err != nil {
-			resp.Diagnostics.AddError("failed to load certificates", fmt.Sprintf("%v", err))
+			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load certificates: %v", err))
 			return
 		}
 	} else {
 		var pool *x509.CertPool
 		pool, err = x509.SystemCertPool()
 		if err != nil {
-			resp.Diagnostics.AddError("failed to load certificates", fmt.Sprintf("%v", err))
+			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load system certificates: %v", err))
 			return
 		}
 		creds = credentials.NewClientTLSFromCert(pool, "")
@@ -105,7 +191,7 @@ func (m *CloudFerroProvider) Configure(
 		)
 	}
 
-	state := &providerState{Cli: cli}
+	state := &providerState{Cli: cli, Region: region}
 
 	resp.DataSourceData = state
 	resp.ResourceData = state
@@ -139,9 +225,10 @@ func (m *CloudFerroProvider) Resources(context.Context) []func() resource.Resour
 func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"host":        schema.StringAttribute{Required: true},
-			"token":       schema.StringAttribute{Required: true, Sensitive: true},
+			"host":        schema.StringAttribute{Optional: true},
+			"token":       schema.StringAttribute{Optional: true, Sensitive: true},
 			"server_cert": schema.StringAttribute{Optional: true},
+			"region":      schema.StringAttribute{Optional: true},
 		},
 	}
 }
