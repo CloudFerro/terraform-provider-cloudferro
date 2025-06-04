@@ -19,7 +19,6 @@ description: |-
 
 - `id` (String) Internal of of the machine specification.
 - `name` (String) Name of the machine specification/flavor.
-- `region` (String) Region name.
 
 ### Read-Only
 

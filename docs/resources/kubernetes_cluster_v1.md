@@ -31,8 +31,8 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
 ### Required
 
 - `control_plane` (Attributes) (see [below for nested schema](#nestedatt--control_plane))
-- `kubernetes_version_id` (String) Id of the kubernetes version.
 - `name` (String) Name of the cluster.
+- `version` (String) Kubernetes version.
 
 ### Read-Only
 
@@ -45,7 +45,7 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
 
 Required:
 
-- `machine_spec_id` (String) Id of the machine flavor.
+- `flavor` (String) Machine flavor to use for control plane.
 - `size` (Number) Size of the control plane.
 
 

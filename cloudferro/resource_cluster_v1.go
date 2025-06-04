@@ -19,6 +19,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
+	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
+	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -37,22 +39,23 @@ func newClusterResource() resource.Resource {
 }
 
 type clusterModelControlPlane struct {
-	Size          types.Int32  `tfsdk:"size"`
-	MachineSpecID types.String `tfsdk:"machine_spec_id"`
+	Size   types.Int32  `tfsdk:"size"`
+	Flavor types.String `tfsdk:"flavor"`
 }
 
 type clusterModel struct {
-	ID                  types.String             `tfsdk:"id"`
-	Name                types.String             `tfsdk:"name"`
-	Status              types.String             `tfsdk:"-"`
-	KubernetesVersionID types.String             `tfsdk:"kubernetes_version_id"`
-	ControlPlane        clusterModelControlPlane `tfsdk:"control_plane"`
-	Kubeconfig          types.String             `tfsdk:"kubeconfig"`
-	Metadata            types.Object             `tfsdk:"metadata"`
+	ID           types.String             `tfsdk:"id"`
+	Name         types.String             `tfsdk:"name"`
+	Status       types.String             `tfsdk:"-"`
+	Version      types.String             `tfsdk:"version"`
+	ControlPlane clusterModelControlPlane `tfsdk:"control_plane"`
+	Kubeconfig   types.String             `tfsdk:"kubeconfig"`
+	Metadata     types.Object             `tfsdk:"metadata"`
 }
 
 type clusterResource struct {
-	cli *grpc.ClientConn
+	cli    *grpc.ClientConn
+	region string
 }
 
 // ImportState implements resource.ResourceWithImportState.
@@ -74,7 +77,7 @@ func (c *clusterResource) ImportState(
 
 	state.ID = types.StringValue(req.ID)
 
-	resp.Diagnostics.Append(refreshClusterState(ctx, c.cli, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -101,13 +104,14 @@ func (c *clusterResource) Configure(
 		return
 	}
 	c.cli = state.Cli
+	c.region = state.Region
 }
 
-func refreshClusterState(ctx context.Context, cli *grpc.ClientConn, state *clusterModel) diag.Diagnostics {
+func (c *clusterResource) refreshClusterState(ctx context.Context, state *clusterModel) diag.Diagnostics {
 	clusterID := state.ID.ValueString()
 	var diags diag.Diagnostics
 
-	clusterCli := clusterservice.NewClusterClient(cli)
+	clusterCli := clusterservice.NewClusterClient(c.cli)
 
 	klaster, err := clusterCli.GetCluster(ctx, &clusterservice.GetClusterRequest{
 		ClusterId: clusterID,
@@ -117,9 +121,17 @@ func refreshClusterState(ctx context.Context, cli *grpc.ClientConn, state *clust
 		return diags
 	}
 
+	if klaster.GetControlPlane().GetCustom().GetMachineSpec().GetRegion() != c.region {
+		diags.AddError("failed to refresh cluster state", "cluster region differs from the provider region")
+		return diags
+	}
+
 	state.ID = types.StringValue(klaster.GetId())
 	state.Name = types.StringValue(klaster.GetName())
 	state.Status = types.StringValue(klaster.GetStatus())
+	state.Version = types.StringValue(klaster.GetVersion().GetVersion())
+	state.ControlPlane.Size = types.Int32Value(klaster.GetControlPlane().GetCustom().GetSize())
+	state.ControlPlane.Flavor = types.StringValue(klaster.GetControlPlane().GetCustom().GetMachineSpec().GetName())
 
 	if klaster.GetStatus() == "Running" {
 		files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
@@ -132,10 +144,6 @@ func refreshClusterState(ctx context.Context, cli *grpc.ClientConn, state *clust
 
 		state.Kubeconfig = types.StringValue(files.GetKubeconfig())
 	}
-
-	state.KubernetesVersionID = types.StringValue(klaster.GetVersion().GetId())
-	state.ControlPlane.Size = types.Int32Value(klaster.GetControlPlane().GetCustom().GetSize())
-	state.ControlPlane.MachineSpecID = types.StringValue(klaster.GetControlPlane().GetCustom().GetMachineSpec().GetId())
 
 	if metadata := klaster.GetMetadata(); metadata != nil {
 		obj, diag := types.ObjectValue(
@@ -165,19 +173,49 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	clusterCli := clusterservice.NewClusterClient(c.cli)
+	versionCli := kubernetesversionservice.NewKubernetesVersionClient(c.cli)
+	machineCli := machinespecservice.NewMachineSpecClient(c.cli)
+
+	machines, err := machineCli.List(ctx, &machinespecservice.ListRequest{
+		Region: &c.region,
+		Name:   state.ControlPlane.Flavor.ValueStringPointer(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to create cluster", err.Error())
+		return
+	}
+
+	if len(machines.GetItems()) != 1 {
+		resp.Diagnostics.AddError("failed to create cluster", "failed to find flavor")
+		return
+	}
+
+	versions, err := versionCli.List(ctx, &kubernetesversionservice.ListRequest{
+		Region:  &c.region,
+		Version: state.Version.ValueStringPointer(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to create cluster", err.Error())
+		return
+	}
+
+	if len(versions.GetItems()) != 1 {
+		resp.Diagnostics.AddError("failed to create cluster", "failed to find kubernetes version")
+		return
+	}
 
 	result, err := clusterCli.CreateCluster(ctx, &clusterservice.CreateClusterRequest{
 		Cluster: &clusterservice.CreateCluster{
 			Name: state.Name.ValueString(),
 			KubernetesVersion: &clusterservice.CreateCluster_KubernetesVersion{
-				Id: state.KubernetesVersionID.ValueString(),
+				Id: versions.GetItems()[0].GetId(),
 			},
 			ControlPlane: &clusterservice.CreateCluster_ControlPlane{
 				Value: &clusterservice.CreateCluster_ControlPlane_Custom{
 					Custom: &clusterservice.CreateCluster_ControlPlaneCustom{
 						Size: state.ControlPlane.Size.ValueInt32(),
 						MachineSpec: &clusterservice.CreateCluster_MachineSpec{
-							Id: state.ControlPlane.MachineSpecID.ValueString(),
+							Id: machines.GetItems()[0].GetId(),
 						},
 					},
 				},
@@ -191,7 +229,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 
 	// update current state with id's
 	state.ID = types.StringValue(result.Id)
-	resp.Diagnostics.Append(refreshClusterState(ctx, c.cli, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -212,7 +250,7 @@ loop:
 			return
 
 		case <-ticker.C:
-			resp.Diagnostics.Append(refreshClusterState(ctx, c.cli, &state)...)
+			resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
 			if resp.Diagnostics.HasError() {
 				return
 			}
@@ -315,7 +353,7 @@ func (c *clusterResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	resp.Diagnostics.Append(refreshClusterState(ctx, c.cli, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -333,14 +371,11 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Computed:    true,
 				Description: "Id of the cluster.",
 			},
-			"kubernetes_version_id": schema.StringAttribute{
+			"version": schema.StringAttribute{
 				Required:    true,
-				Description: "Id of the kubernetes version.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.RequiresReplace(),
-				},
+				Description: "Kubernetes version.",
 				Validators: []validator.String{
-					stringvalidator.RegexMatches(uuidRegex, "must be valid uuid"),
+					stringvalidator.RegexMatches(regexp.MustCompile(`\d+\.\d+\.\d+`), "must be a valid version"),
 				},
 			},
 			"name": schema.StringAttribute{
@@ -370,12 +405,9 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 							int32validator.OneOf(1, 3, 5),
 						},
 					},
-					"machine_spec_id": schema.StringAttribute{
+					"flavor": schema.StringAttribute{
 						Required:    true,
-						Description: "Id of the machine flavor.",
-						Validators: []validator.String{
-							stringvalidator.RegexMatches(uuidRegex, "must be valid uuid"),
-						},
+						Description: "Machine flavor to use for control plane.",
 					},
 				},
 			},
@@ -415,6 +447,7 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	clusterID := current.ID.ValueString()
 
 	cli := clusterservice.NewClusterClient(c.cli)
+	versionCli := kubernetesversionservice.NewKubernetesVersionClient(c.cli)
 
 	klaster, err := cli.GetCluster(ctx, &clusterservice.GetClusterRequest{ClusterId: clusterID})
 	if err != nil {
@@ -422,7 +455,23 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	klaster.Version.Id = request.KubernetesVersionID.ValueString()
+	xTrue := true
+	versions, err := versionCli.List(ctx, &kubernetesversionservice.ListRequest{
+		Region:   &c.region,
+		Version:  request.Version.ValueStringPointer(),
+		IsActive: &xTrue,
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to update cluster", err.Error())
+		return
+	}
+
+	if len(versions.GetItems()) != 1 {
+		resp.Diagnostics.AddError("failed to update cluster", "failed to get kubernetes version")
+		return
+	}
+
+	klaster.Version.Id = versions.GetItems()[0].GetId()
 
 	tflog.Info(ctx, "update cluser", map[string]any{"object": klaster})
 	_, err = cli.UpdateCluster(ctx, &clusterservice.UpdateClusterRequest{
@@ -438,7 +487,7 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	defer ticker.Stop()
 
 	for {
-		resp.Diagnostics.Append(refreshClusterState(ctx, c.cli, &current)...)
+		resp.Diagnostics.Append(c.refreshClusterState(ctx, &current)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}

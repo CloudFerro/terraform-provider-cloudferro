@@ -31,8 +31,8 @@ resource "cloudferro_kubernetes_node_pool_v1" "worker" {
 ### Required
 
 - `cluster_id` (String) Id of the cluster.
+- `flavor` (String) Machine flavor.
 - `labels` (Attributes List) List of labels. Must followe standard kubernetes requirements. (see [below for nested schema](#nestedatt--labels))
-- `machine_spec_id` (String) Id of the machine flavor.
 - `name` (String) Name of the node pool.
 - `shared_networks` (List of String) A list of network ids that should be attached to the nodes in the node pool.
 - `taints` (Attributes List) List of initial taints applied to the nodes of this node pool. (see [below for nested schema](#nestedatt--taints))
