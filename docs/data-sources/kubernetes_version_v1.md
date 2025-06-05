@@ -13,8 +13,6 @@ description: |-
 ## Example Usage
 
 ```terraform
-# vim: set softtabstop=2 shiftwidth=2 expandtab :
-
 data "cloudferro_kubernetes_version_v1" "version" {
   version = "1.30.0"
 }

@@ -1,10 +1,8 @@
-# vim: set softtabstop=2 shiftwidth=2 expandtab :
-
 resource "cloudferro_kubernetes_cluster_v1" "cluster" {
   control_plane = {
-    machine_spec_id = "spec id"
-    size            = 1
+    flavor = "eo2a.2xlarge"
+    size   = 5
   }
-  name                  = "my cluster"
-  kubernetes_version_id = "version id"
+  name    = "my cluster"
+  version = "1.30.10"
 }
