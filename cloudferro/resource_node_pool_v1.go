@@ -128,7 +128,10 @@ func (c *nodePoolResource) ImportState(
 	}
 
 	if cluster.GetControlPlane().GetCustom().GetMachineSpec().GetRegion() != c.region {
-		resp.Diagnostics.AddError("failed to import node pool state", "invalid region, cluster region differs from the region in the provider.")
+		resp.Diagnostics.AddError(
+			"failed to import node pool state",
+			"invalid region, cluster region differs from the region in the provider.",
+		)
 		return
 	}
 

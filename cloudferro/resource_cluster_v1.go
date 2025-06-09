@@ -297,7 +297,7 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		return
 	}
 
-	if cluster.Status == "Running" {
+	if cluster.Status == "Running" || cluster.Status == "Error" {
 		_, err = cli.DeleteCluster(ctx, &clusterservice.DeleteClusterRequest{
 			ClusterId: clusterID,
 		})
@@ -370,6 +370,9 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"id": schema.StringAttribute{
 				Computed:    true,
 				Description: "Id of the cluster.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"version": schema.StringAttribute{
 				Required:    true,
@@ -467,7 +470,10 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	}
 
 	if len(versions.GetItems()) != 1 {
-		resp.Diagnostics.AddError("failed to update cluster", "failed to get kubernetes version")
+		resp.Diagnostics.AddError(
+			"failed to update cluster",
+			"failed to get kubernetes version",
+		)
 		return
 	}
 
@@ -499,6 +505,14 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 		if current.Status.ValueString() == "Running" {
 			break
+		}
+
+		if current.Status.ValueString() == "Error" {
+			resp.Diagnostics.AddError(
+				"failed to update cluster",
+				"cluster in the 'Error' status.",
+			)
+			return
 		}
 
 		select {
