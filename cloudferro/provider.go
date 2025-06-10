@@ -199,10 +199,7 @@ func (m *CloudFerroProvider) Configure(
 
 // DataSources implements provider.Provider.
 func (m *CloudFerroProvider) DataSources(context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-		newMachineSpecDataSource,
-		newKubernetesVersionDataSource,
-	}
+	return []func() datasource.DataSource{}
 }
 
 // Metadata implements provider.Provider.
