@@ -222,10 +222,23 @@ func (m *CloudFerroProvider) Resources(context.Context) []func() resource.Resour
 func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"host":        schema.StringAttribute{Optional: true},
-			"token":       schema.StringAttribute{Optional: true, Sensitive: true},
-			"server_cert": schema.StringAttribute{Optional: true},
-			"region":      schema.StringAttribute{Optional: true},
+			"host": schema.StringAttribute{
+				Optional:    true,
+				Description: "Address of the CloudFerro Managed Kubernetes service. Should be in the form of <host>:<port> or <host> if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set.",
+			},
+			"token": schema.StringAttribute{
+				Optional:    true,
+				Sensitive:   true,
+				Description: "API Token for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_TOKEN` environment variable is set.",
+			},
+			"server_cert": schema.StringAttribute{
+				Optional:    true,
+				Description: "Path to a PEM-encoded certificate file for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_CERT` environment variable is set.",
+			},
+			"region": schema.StringAttribute{
+				Optional:    true,
+				Description: "Region of the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_REGION` environment variable is set.",
+			},
 		},
 	}
 }
