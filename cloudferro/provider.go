@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -180,6 +181,7 @@ func (m *CloudFerroProvider) Configure(
 	cli, err := grpc.NewClient(
 		host,
 		grpc.WithTransportCredentials(creds),
+		grpc.WithAuthority(formatAuthority(host)),
 		grpc.WithDefaultCallOptions(
 			grpc.PerRPCCredentials(tokenAuth{token: token}),
 		),
@@ -241,4 +243,17 @@ func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaReques
 			},
 		},
 	}
+}
+
+func formatAuthority(host string) string {
+	parts := strings.Split(host, ":")
+	if len(parts) == 1 {
+		return host
+	}
+
+	if parts[1] == "443" || parts[1] == "80" {
+		return parts[0]
+	}
+
+	return host
 }

@@ -31,7 +31,7 @@ func main() {
 		context.Background(),
 		cloudferro.NewProvider(version),
 		providerserver.ServeOpts{
-			Address: "registry.terraform.io/cloudferro/terraform-provider-cloudferro",
+			Address: "registry.terraform.io/cloudferro/cloudferro",
 			Debug:   debug,
 		},
 	)
