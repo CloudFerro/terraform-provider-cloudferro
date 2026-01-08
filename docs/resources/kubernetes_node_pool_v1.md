@@ -30,17 +30,17 @@ resource "cloudferro_kubernetes_node_pool_v1" "worker" {
 
 - `cluster_id` (String) Id of the cluster.
 - `flavor` (String) Machine flavor.
-- `labels` (Attributes List) List of labels. Must followe standard kubernetes requirements. (see [below for nested schema](#nestedatt--labels))
 - `name` (String) Name of the node pool.
-- `shared_networks` (List of String) A list of network ids that should be attached to the nodes in the node pool.
-- `taints` (Attributes List) List of initial taints applied to the nodes of this node pool. (see [below for nested schema](#nestedatt--taints))
 
 ### Optional
 
 - `autoscale` (Boolean) Should node pool autoscale based on the usage? If set size_min and size_max must also be provided.
+- `labels` (Attributes List) List of labels. Must followe standard kubernetes requirements. (see [below for nested schema](#nestedatt--labels))
+- `shared_networks` (List of String) A list of network ids that should be attached to the nodes in the node pool.
 - `size` (Number) Size of the static node pool.
 - `size_max` (Number) Maximum size of the node pool when autoscale is turn on.
 - `size_min` (Number) Minimum size of the node pool when autoscale is turn on.
+- `taints` (Attributes List) List of initial taints applied to the nodes of this node pool. (see [below for nested schema](#nestedatt--taints))
 
 ### Read-Only
 

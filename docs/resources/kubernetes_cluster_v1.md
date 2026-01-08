@@ -37,6 +37,7 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
 - `id` (String) Id of the cluster.
 - `kubeconfig` (String, Sensitive) Cluster kubeconfig. Should be used with kubectl to interact with the cluster.
 - `metadata` (Attributes) Cluster metadata. (see [below for nested schema](#nestedatt--metadata))
+- `router_ip` (String) Address of the cluster gateway.
 
 <a id="nestedatt--control_plane"></a>
 ### Nested Schema for `control_plane`

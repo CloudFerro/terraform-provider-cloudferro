@@ -5,3 +5,4 @@
 .stubs
 dist/
 terraform-provider-cloudferro
+.env

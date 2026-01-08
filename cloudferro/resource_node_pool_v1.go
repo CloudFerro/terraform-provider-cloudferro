@@ -23,7 +23,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepool/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepoolservice/v1"
@@ -70,8 +69,7 @@ type nodePoolModel struct {
 }
 
 type nodePoolResource struct {
-	cli    *grpc.ClientConn
-	region string
+	cli *grpc.ClientConn
 }
 
 // ConfigValidators implements resource.ResourceWithConfigValidators.
@@ -117,24 +115,6 @@ func (c *nodePoolResource) ImportState(
 	state.ClusterID = types.StringValue(parts[0])
 	state.ID = types.StringValue(parts[1])
 
-	clusterCli := clusterservice.NewClusterClient(c.cli)
-
-	cluster, err := clusterCli.GetCluster(ctx, &clusterservice.GetClusterRequest{
-		ClusterId: state.ClusterID.ValueString(),
-	})
-	if err != nil {
-		resp.Diagnostics.AddError("failed to import node pool state", err.Error())
-		return
-	}
-
-	if cluster.GetControlPlane().GetCustom().GetMachineSpec().GetRegion() != c.region {
-		resp.Diagnostics.AddError(
-			"failed to import node pool state",
-			"invalid region, cluster region differs from the region in the provider.",
-		)
-		return
-	}
-
 	resp.Diagnostics.Append(refreshNodePoolState(ctx, c.cli, &state)...)
 	if resp.Diagnostics.HasError() {
 		return
@@ -162,7 +142,6 @@ func (c *nodePoolResource) Configure(
 		return
 	}
 	c.cli = state.Cli
-	c.region = state.Region
 }
 
 func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *nodePoolModel) diag.Diagnostics {
@@ -194,7 +173,11 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	for _, el := range nodePool.SharedNetworks {
 		sharedNetworks = append(sharedNetworks, types.StringValue(el))
 	}
-	state.SharedNetworks = types.ListValueMust(types.StringType, sharedNetworks)
+	if len(sharedNetworks) > 0 && !state.SharedNetworks.IsUnknown() {
+		state.SharedNetworks = types.ListValueMust(types.StringType, sharedNetworks)
+	} else {
+		state.SharedNetworks = types.ListNull(types.StringType)
+	}
 
 	labelsInnerType := map[string]attr.Type{
 		"key":   types.StringType,
@@ -221,9 +204,13 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 
 	}
 
-	state.Labels = types.ListValueMust(
-		types.ObjectType{AttrTypes: labelsInnerType},
-		labels)
+	if len(labels) > 0 && !state.Labels.IsUnknown() {
+		state.Labels = types.ListValueMust(
+			types.ObjectType{AttrTypes: labelsInnerType},
+			labels)
+	} else {
+		state.Labels = types.ListNull(types.ObjectType{AttrTypes: labelsInnerType})
+	}
 
 	taintsInnerType := map[string]attr.Type{
 		"key":    types.StringType,
@@ -257,9 +244,13 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 
 	}
 
-	state.Taints = types.ListValueMust(
-		types.ObjectType{AttrTypes: taintsInnerType},
-		taints)
+	if len(taints) > 0 && !state.Taints.IsUnknown() {
+		state.Taints = types.ListValueMust(
+			types.ObjectType{AttrTypes: taintsInnerType},
+			taints)
+	} else {
+		state.Taints = types.ListNull(types.ObjectType{AttrTypes: taintsInnerType})
+	}
 
 	return diags
 }
@@ -329,8 +320,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	machineSpecs, err := msCli.List(ctx, &machinespecservice.ListRequest{
-		Region: &c.region,
-		Name:   state.Flavor.ValueStringPointer(),
+		Name: state.Flavor.ValueStringPointer(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create node pool", err.Error())
@@ -583,12 +573,12 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 			"shared_networks": schema.ListAttribute{
 				Description:   "A list of network ids that should be attached to the nodes in the node pool.",
 				ElementType:   types.StringType,
-				Required:      true,
+				Optional:      true,
 				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
 			},
 			"labels": schema.ListNestedAttribute{
 				Description: "List of labels. Must followe standard kubernetes requirements.",
-				Required:    true,
+				Optional:    true,
 				PlanModifiers: []planmodifier.List{
 					listplanmodifier.RequiresReplace(),
 				},
@@ -614,7 +604,7 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 			},
 			"taints": schema.ListNestedAttribute{
 				Description:   "List of initial taints applied to the nodes of this node pool.",
-				Required:      true,
+				Optional:      true,
 				PlanModifiers: []planmodifier.List{listplanmodifier.RequiresReplace()},
 				Validators:    []validator.List{listvalidator.SizeAtMost(50)},
 				NestedObject: schema.NestedAttributeObject{

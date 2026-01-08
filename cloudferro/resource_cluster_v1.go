@@ -51,11 +51,11 @@ type clusterModel struct {
 	ControlPlane clusterModelControlPlane `tfsdk:"control_plane"`
 	Kubeconfig   types.String             `tfsdk:"kubeconfig"`
 	Metadata     types.Object             `tfsdk:"metadata"`
+	RouterIP     types.String             `tfsdk:"router_ip"`
 }
 
 type clusterResource struct {
-	cli    *grpc.ClientConn
-	region string
+	cli *grpc.ClientConn
 }
 
 // ImportState implements resource.ResourceWithImportState.
@@ -104,7 +104,6 @@ func (c *clusterResource) Configure(
 		return
 	}
 	c.cli = state.Cli
-	c.region = state.Region
 }
 
 func (c *clusterResource) refreshClusterState(ctx context.Context, state *clusterModel) diag.Diagnostics {
@@ -121,17 +120,15 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		return diags
 	}
 
-	if klaster.GetControlPlane().GetCustom().GetMachineSpec().GetRegion() != c.region {
-		diags.AddError("failed to refresh cluster state", "cluster region differs from the provider region")
-		return diags
-	}
-
 	state.ID = types.StringValue(klaster.GetId())
 	state.Name = types.StringValue(klaster.GetName())
 	state.Status = types.StringValue(klaster.GetStatus())
 	state.Version = types.StringValue(klaster.GetVersion().GetVersion())
 	state.ControlPlane.Size = types.Int32Value(klaster.GetControlPlane().GetCustom().GetSize())
 	state.ControlPlane.Flavor = types.StringValue(klaster.GetControlPlane().GetCustom().GetMachineSpec().GetName())
+	if klaster.GetRouterIp() != "" {
+		state.RouterIP = types.StringValue(klaster.GetRouterIp())
+	}
 
 	if klaster.GetStatus() == "Running" {
 		files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
@@ -177,8 +174,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	machineCli := machinespecservice.NewMachineSpecClient(c.cli)
 
 	machines, err := machineCli.List(ctx, &machinespecservice.ListRequest{
-		Region: &c.region,
-		Name:   state.ControlPlane.Flavor.ValueStringPointer(),
+		Name: state.ControlPlane.Flavor.ValueStringPointer(),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("failed to create cluster", err.Error())
@@ -191,7 +187,6 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	}
 
 	versions, err := versionCli.List(ctx, &kubernetesversionservice.ListRequest{
-		Region:  &c.region,
 		Version: state.Version.ValueStringPointer(),
 	})
 	if err != nil {
@@ -429,6 +424,10 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 					},
 				},
 			},
+			"router_ip": schema.StringAttribute{
+				Computed:    true,
+				Description: "Address of the cluster gateway.",
+			},
 		},
 	}
 }
@@ -460,7 +459,6 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	xTrue := true
 	versions, err := versionCli.List(ctx, &kubernetesversionservice.ListRequest{
-		Region:   &c.region,
 		Version:  request.Version.ValueStringPointer(),
 		IsActive: &xTrue,
 	})

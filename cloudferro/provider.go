@@ -7,15 +7,26 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
+
+var (
+	hostPrefix = "managed-kubernetes"
+	hostSuffix = "cloudferro.com"
+)
+
+func gethost(region string) string {
+	return fmt.Sprintf("%s.%s.%s", hostPrefix, region, hostSuffix)
+}
 
 var _ credentials.PerRPCCredentials = (*tokenAuth)(nil)
 
@@ -36,8 +47,7 @@ func (t tokenAuth) RequireTransportSecurity() bool {
 }
 
 type providerState struct {
-	Cli    *grpc.ClientConn
-	Region string
+	Cli *grpc.ClientConn
 }
 
 var _ provider.Provider = (*CloudFerroProvider)(nil)
@@ -127,15 +137,6 @@ func (m *CloudFerroProvider) Configure(
 		cert = config.ServerCert.ValueString()
 	}
 
-	if host == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("host"),
-			"Missing CloudFerro API Host",
-			"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API host. "+
-				"Set the host value in the configuration or use the CLOUDFERRO_HOST environment variable. "+
-				"If either is already set, ensure the value is not empty.",
-		)
-	}
 	if token == "" {
 		resp.Diagnostics.AddAttributeError(
 			path.Root("token"),
@@ -145,14 +146,28 @@ func (m *CloudFerroProvider) Configure(
 				"If either is already set, ensure the value is not empty.",
 		)
 	}
-	if region == "" {
-		resp.Diagnostics.AddAttributeError(
-			path.Root("region"),
-			"Missing CloudFerro API Region",
-			"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API region. "+
-				"Set the host value in the configuration or use the CLOUDFERRO_REGION environment variable. "+
-				"If either is already set, ensure the value is not empty.",
-		)
+	if host == "" {
+		if region == "" {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("region"),
+				"Missing CloudFerro API Region",
+				"The provider cannot create the CloudFerro API client as there is a missing or empty value for the CloudFerro API region. "+
+					"Set the region value in the configuration or use the CLOUDFERRO_REGION environment variable. "+
+					"If either is already set, ensure the value is not empty.",
+			)
+		} else {
+			host = gethost(region)
+		}
+	} else {
+		if region != "" {
+			resp.Diagnostics.AddAttributeError(
+				path.Root("region"),
+				"Region and Host are mutually exclusive",
+				"The provider cannot create the CloudFerro API client as both region and host are set. "+
+					"Either set the region value in the configuration or use the CLOUDFERRO_REGION environment variable, "+
+					"or set the host value in the configuration or use the CLOUDFERRO_HOST environment variable. ",
+			)
+		}
 	}
 
 	if resp.Diagnostics.HasError() {
@@ -193,7 +208,7 @@ func (m *CloudFerroProvider) Configure(
 		)
 	}
 
-	state := &providerState{Cli: cli, Region: region}
+	state := &providerState{Cli: cli}
 
 	resp.DataSourceData = state
 	resp.ResourceData = state
@@ -227,6 +242,11 @@ func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaReques
 			"host": schema.StringAttribute{
 				Optional:    true,
 				Description: "Address of the CloudFerro Managed Kubernetes service. Should be in the form of <host>:<port> or <host> if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set.",
+				Validators: []validator.String{
+					stringvalidator.ConflictsWith(
+						path.MatchRelative().AtParent().AtName("region"),
+					),
+				},
 			},
 			"token": schema.StringAttribute{
 				Optional:    true,
