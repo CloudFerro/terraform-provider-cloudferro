@@ -173,10 +173,10 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	for _, el := range nodePool.SharedNetworks {
 		sharedNetworks = append(sharedNetworks, types.StringValue(el))
 	}
-	if len(sharedNetworks) > 0 && !state.SharedNetworks.IsUnknown() {
-		state.SharedNetworks = types.ListValueMust(types.StringType, sharedNetworks)
-	} else {
+	if state.SharedNetworks.IsUnknown() || state.SharedNetworks.IsNull() {
 		state.SharedNetworks = types.ListNull(types.StringType)
+	} else {
+		state.SharedNetworks = types.ListValueMust(types.StringType, sharedNetworks)
 	}
 
 	labelsInnerType := map[string]attr.Type{
@@ -204,12 +204,10 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 
 	}
 
-	if len(labels) > 0 && !state.Labels.IsUnknown() {
-		state.Labels = types.ListValueMust(
-			types.ObjectType{AttrTypes: labelsInnerType},
-			labels)
-	} else {
+	if state.Labels.IsUnknown() || state.Labels.IsNull() {
 		state.Labels = types.ListNull(types.ObjectType{AttrTypes: labelsInnerType})
+	} else {
+		state.Labels = types.ListValueMust(types.ObjectType{AttrTypes: labelsInnerType}, labels)
 	}
 
 	taintsInnerType := map[string]attr.Type{
@@ -244,12 +242,10 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 
 	}
 
-	if len(taints) > 0 && !state.Taints.IsUnknown() {
-		state.Taints = types.ListValueMust(
-			types.ObjectType{AttrTypes: taintsInnerType},
-			taints)
-	} else {
+	if state.Taints.IsUnknown() || state.Taints.IsNull() {
 		state.Taints = types.ListNull(types.ObjectType{AttrTypes: taintsInnerType})
+	} else {
+		state.Taints = types.ListValueMust(types.ObjectType{AttrTypes: taintsInnerType}, taints)
 	}
 
 	return diags
