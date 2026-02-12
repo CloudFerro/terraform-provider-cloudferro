@@ -175,27 +175,32 @@ func (m *CloudFerroProvider) Configure(
 	}
 
 	var err error
-	var creds credentials.TransportCredentials
+
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+		resp.Diagnostics.AddWarning("failed to configure provider", fmt.Sprintf("failed to load system certificates: %v", err))
+	}
 
 	if cert != "" {
-		creds, err = credentials.NewClientTLSFromFile(cert, "")
+		var certData []byte
+		certData, err = os.ReadFile(cert)
 		if err != nil {
-			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load certificates: %v", err))
+			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load certificate: %v", err))
 			return
 		}
-	} else {
-		var pool *x509.CertPool
-		pool, err = x509.SystemCertPool()
-		if err != nil {
-			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load system certificates: %v", err))
+
+		if !pool.AppendCertsFromPEM(certData) {
+			resp.Diagnostics.AddError("failed to configure provider", "credentials: failed to append certificates")
 			return
 		}
-		creds = credentials.NewClientTLSFromCert(pool, "")
 	}
 
 	cli, err := grpc.NewClient(
 		host,
-		grpc.WithTransportCredentials(creds),
+		grpc.WithTransportCredentials(
+			credentials.NewClientTLSFromCert(pool, ""),
+		),
 		grpc.WithAuthority(formatAuthority(host)),
 		grpc.WithDefaultCallOptions(
 			grpc.PerRPCCredentials(tokenAuth{token: token}),
