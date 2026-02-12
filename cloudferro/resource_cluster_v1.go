@@ -19,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
+	"gitlab.cloudferro.com/k8s/api/error/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"google.golang.org/grpc"
@@ -128,6 +129,8 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	state.ControlPlane.Flavor = types.StringValue(klaster.GetControlPlane().GetCustom().GetMachineSpec().GetName())
 	if klaster.GetRouterIp() != "" {
 		state.RouterIP = types.StringValue(klaster.GetRouterIp())
+	} else if state.RouterIP.IsUnknown() {
+		state.RouterIP = types.StringNull()
 	}
 
 	if klaster.GetStatus() == "Running" {
@@ -140,6 +143,8 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		}
 
 		state.Kubeconfig = types.StringValue(files.GetKubeconfig())
+	} else if state.Kubeconfig.IsUnknown() {
+		state.Kubeconfig = types.StringNull()
 	}
 
 	if metadata := klaster.GetMetadata(); metadata != nil {
@@ -156,6 +161,12 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		}
 
 		state.Metadata = obj
+	} else if state.Metadata.IsUnknown() {
+		state.Metadata = types.ObjectNull(
+			map[string]attr.Type{
+				"openstack_project_id": types.StringType,
+			},
+		)
 	}
 
 	return diags
@@ -256,7 +267,29 @@ loop:
 			}
 
 			if state.Status.ValueString() == "Error" {
+				cli := clusterservice.NewClusterClient(c.cli)
+
+				r, err := cli.GetCluster(ctx, &clusterservice.GetClusterRequest{
+					ClusterId:   state.ID.ValueString(),
+					ExtraFields: "errors",
+				})
+				if err != nil {
+					resp.Diagnostics.AddError("failed to create cluster", err.Error())
+					return
+				}
+
+				latesrErr := &error.Error{}
+				for _, er := range r.GetErrors() {
+					if latesrErr.CreatedAt.AsTime().Before(er.GetCreatedAt().AsTime()) {
+						latesrErr = er
+					}
+				}
+
 				errStr := "Unknown error"
+				if !latesrErr.CreatedAt.AsTime().IsZero() {
+					errStr = latesrErr.GetMsg()
+				}
+
 				resp.Diagnostics.AddError("failed to create cluster", errStr)
 				return
 			} else if state.Status.ValueString() == "Running" {
