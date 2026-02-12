@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/cloudferro/terraform-provider-cloudferro/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int32validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -19,7 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
-	"gitlab.cloudferro.com/k8s/api/error/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"google.golang.org/grpc"
@@ -114,7 +114,8 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	clusterCli := clusterservice.NewClusterClient(c.cli)
 
 	klaster, err := clusterCli.GetCluster(ctx, &clusterservice.GetClusterRequest{
-		ClusterId: clusterID,
+		ClusterId:   clusterID,
+		ExtraFields: "errors",
 	})
 	if err != nil {
 		diags.AddError("failed to refresh cluster state", err.Error())
@@ -167,6 +168,17 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 				"openstack_project_id": types.StringType,
 			},
 		)
+	}
+
+	if len(klaster.Errors) > 0 {
+		lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+		if err != nil {
+			diags.AddError("failed to refresh cluster state", err.Error())
+			return diags
+		}
+
+		diags.AddError("failed to refresh cluster state", lastErr.Msg)
+
 	}
 
 	return diags
@@ -266,33 +278,7 @@ loop:
 				return
 			}
 
-			if state.Status.ValueString() == "Error" {
-				cli := clusterservice.NewClusterClient(c.cli)
-
-				r, err := cli.GetCluster(ctx, &clusterservice.GetClusterRequest{
-					ClusterId:   state.ID.ValueString(),
-					ExtraFields: "errors",
-				})
-				if err != nil {
-					resp.Diagnostics.AddError("failed to create cluster", err.Error())
-					return
-				}
-
-				latesrErr := &error.Error{}
-				for _, er := range r.GetErrors() {
-					if latesrErr.CreatedAt.AsTime().Before(er.GetCreatedAt().AsTime()) {
-						latesrErr = er
-					}
-				}
-
-				errStr := "Unknown error"
-				if !latesrErr.CreatedAt.AsTime().IsZero() {
-					errStr = latesrErr.GetMsg()
-				}
-
-				resp.Diagnostics.AddError("failed to create cluster", errStr)
-				return
-			} else if state.Status.ValueString() == "Running" {
+			if state.Status.ValueString() == "Running" {
 				break loop
 			}
 
@@ -315,36 +301,21 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	clusterID := state.ID.ValueString()
 
-	cli := clusterservice.NewClusterClient(c.cli)
-
-	cluster, err := cli.GetCluster(ctx, &clusterservice.GetClusterRequest{
-		ClusterId: clusterID,
-	})
-	if err != nil {
+	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ID.ValueString())
+	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+		return
+	} else if err != nil {
 		resp.Diagnostics.AddError("failed to delete cluster", err.Error())
 		return
 	}
 
-	if cluster.Status == "Running" || cluster.Status == "Error" {
-		_, err = cli.DeleteCluster(ctx, &clusterservice.DeleteClusterRequest{
-			ClusterId: clusterID,
-		})
-		if err != nil {
-			resp.Diagnostics.AddError("failed to delete cluster", err.Error())
-			return
-		}
-
-	} else if cluster.Status != "Deleting" {
-		resp.Diagnostics.AddError("failed to delete cluster", "resource in the wrong state")
-		return
-	}
+	cli := clusterservice.NewClusterClient(c.cli)
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	for {
-
-		_, err = cli.GetCluster(ctx, &clusterservice.GetClusterRequest{
+		cl, err := cli.GetCluster(ctx, &clusterservice.GetClusterRequest{
 			ClusterId: clusterID,
 		})
 		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
@@ -352,6 +323,24 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		} else if err != nil {
 			resp.Diagnostics.AddError("failed to delete cluster", err.Error())
 			return
+		}
+
+		if cl.Status == "Error" {
+			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			if err != nil {
+				resp.Diagnostics.AddError("failed to delete cluster", err.Error())
+				return
+			}
+
+			if lastErr != nil {
+				resp.Diagnostics.AddError("failed to delete cluster", lastErr.Msg)
+				return
+			} else {
+				resp.Diagnostics.AddError(
+					"failed to delete cluster",
+					"cluster in the invalid state",
+				)
+			}
 		}
 
 		select {
@@ -536,14 +525,6 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 		if current.Status.ValueString() == "Running" {
 			break
-		}
-
-		if current.Status.ValueString() == "Error" {
-			resp.Diagnostics.AddError(
-				"failed to update cluster",
-				"cluster in the 'Error' status.",
-			)
-			return
 		}
 
 		select {

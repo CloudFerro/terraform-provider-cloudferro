@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cloudferro/terraform-provider-cloudferro/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int32validator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -248,6 +249,24 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 		state.Taints = types.ListValueMust(types.ObjectType{AttrTypes: taintsInnerType}, taints)
 	}
 
+	if state.Status.ValueString() == "Error" {
+		lastErr, err := utils.GetLatestError(ctx, cli, state.ClusterID.ValueString())
+		if err != nil {
+			diags.AddError("failed to refresh node pool state", err.Error())
+		}
+
+		if lastErr != nil {
+			diags.AddError("failed to refresh node pool state", lastErr.Msg)
+		} else {
+			diags.AddError(
+				"failed to refresh node pool state",
+				"cluster in the invalid state",
+			)
+		}
+		return diags
+
+	}
+
 	return diags
 }
 
@@ -260,6 +279,12 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 	}
 
 	clusterID := state.ClusterID.ValueString()
+
+	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ClusterID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("failed to create node pool", err.Error())
+		return
+	}
 
 	npCli := nodepoolservice.NewNodePoolClient(c.cli)
 	msCli := machinespecservice.NewMachineSpecClient(c.cli)
@@ -407,6 +432,12 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 		return
 	}
 
+	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ClusterID.ValueString())
+	if err != nil {
+		resp.Diagnostics.AddError("failed to delete node pool", err.Error())
+		return
+	}
+
 	nodePoolID := state.ID.ValueString()
 	clusterID := state.ClusterID.ValueString()
 
@@ -416,7 +447,10 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 		ClusterId:  clusterID,
 		NodePoolId: nodePoolID,
 	})
-	if err != nil {
+	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+		tflog.Info(ctx, "node pool not found, nothing to delete")
+		return
+	} else if err != nil {
 		resp.Diagnostics.AddError("failed to delete node pool", err.Error())
 		return
 	}
@@ -426,13 +460,28 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 			ClusterId:  clusterID,
 			NodePoolId: nodePoolID,
 		})
-		if err != nil {
+		if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
+			tflog.Info(ctx, "node pool not found, nothing to delete")
+			return
+		} else if err != nil {
 			resp.Diagnostics.AddError("failed to delete node pool", err.Error())
 			return
 		}
 
 	} else if nodePool.Status != "Deleting" {
-		resp.Diagnostics.AddError("failed to delete node pool", "resource in the wrong state")
+		lastErr, err := utils.GetLatestError(ctx, c.cli, state.ClusterID.ValueString())
+		if err != nil {
+			resp.Diagnostics.AddError("failed to refresh delete node pool", err.Error())
+		}
+
+		if lastErr != nil {
+			resp.Diagnostics.AddError("failed to delete node pool", lastErr.Msg)
+		} else {
+			resp.Diagnostics.AddError(
+				"failed to delete node pool",
+				"cluster in the invalid state",
+			)
+		}
 		return
 	}
 
@@ -441,7 +490,7 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	for {
 
-		_, err = cli.GetNodePool(ctx, &nodepoolservice.GetNodePoolRequest{
+		np, err := cli.GetNodePool(ctx, &nodepoolservice.GetNodePoolRequest{
 			ClusterId:  clusterID,
 			NodePoolId: nodePoolID,
 		})
@@ -449,6 +498,25 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 			return
 		} else if err != nil {
 			resp.Diagnostics.AddError("failed to delete node pool", err.Error())
+			return
+		}
+
+		if np.Status == "Error" {
+			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			if err != nil {
+				resp.Diagnostics.AddError("failed to delete node pool", "unknown error")
+				return
+			}
+
+			if lastErr != nil {
+				resp.Diagnostics.AddError("failed to delete node pool", lastErr.Msg)
+			} else {
+				resp.Diagnostics.AddError(
+					"failed to delete node pool",
+					"cluster in the invalid state",
+				)
+			}
+
 			return
 		}
 
@@ -687,6 +755,24 @@ func (c *nodePoolResource) Update(ctx context.Context, req resource.UpdateReques
 
 		if current.Status.ValueString() == "Running" {
 			break
+		}
+
+		if current.Status.ValueString() == "Error" {
+			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			if err != nil {
+				resp.Diagnostics.AddError("failed to update node pool", "unknown error")
+				return
+			}
+
+			if lastErr != nil {
+				resp.Diagnostics.AddError("failed to update node pool", lastErr.Msg)
+			} else {
+				resp.Diagnostics.AddError(
+					"failed to update node pool",
+					"cluster in the invalid state",
+				)
+			}
+
 		}
 
 		select {
