@@ -1,0 +1,44 @@
+stages:
+  - build
+  - qa-tests
+
+variables:
+  PROVIDER_VERSION: "0.0.1"
+
+build:
+  image: golang:1.24
+  stage: build
+  tags:
+    - kubernetes-waw3-2-general-01-staging
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - go env -w GOPRIVATE=gitlab.cloudferro.com
+    - echo -e "machine gitlab.cloudferro.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+    - rm -f go.sum
+    - go mod tidy
+    - go build -o terraform-provider-cloudferro_v${PROVIDER_VERSION}
+  after_script:
+    - echo "BUILD_JOB_ID=$CI_JOB_ID" >> build.env
+  artifacts:
+    paths:
+      - terraform-provider-cloudferro_v${PROVIDER_VERSION}
+    reports:
+      dotenv: build.env
+
+qa_tests:
+  stage: qa-tests
+  needs:
+    - job: build
+  variables:
+    PROVIDER_PROJECT_ID: "$CI_PROJECT_ID"
+    PROVIDER_BUILD_JOB_ID: $BUILD_JOB_ID
+    TEST_TYPE: "terraform_gitlab"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  trigger:
+    project: "QA/managed-k8s"
+    branch: "master"
+    strategy: depend
+    forward:
+      pipeline_variables: true
