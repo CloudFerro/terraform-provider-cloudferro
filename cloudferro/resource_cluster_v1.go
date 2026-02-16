@@ -3,6 +3,7 @@ package cloudferro
 import (
 	"context"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/cloudferro/terraform-provider-cloudferro/internal/utils"
@@ -26,6 +27,19 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+var (
+	resourceMutexes sync.Map
+	globalMutex     sync.Mutex
+)
+
+func getResourceMutex(resourceID string) *sync.Mutex {
+	globalMutex.Lock()
+	defer globalMutex.Unlock()
+
+	actual, _ := resourceMutexes.LoadOrStore(resourceID, &sync.Mutex{})
+	return actual.(*sync.Mutex)
+}
 
 var uuidRegex = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89abAB][0-9a-f]{3}-[0-9a-f]{12}$`)
 
@@ -170,7 +184,7 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		)
 	}
 
-	if len(klaster.Errors) > 0 {
+	if klaster.Status == "Error" && len(klaster.Errors) > 0 {
 		lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
 		if err != nil {
 			diags.AddError("failed to refresh cluster state", err.Error())
@@ -260,27 +274,27 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-loop:
 	for {
+		resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		if state.Status.ValueString() == "Running" {
+			return
+		}
 		select {
 		case <-ctx.Done():
 			resp.Diagnostics.AddError("failed to create cluster", ctx.Err().Error())
 			return
 
 		case <-ticker.C:
-			resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-
-			resp.Diagnostics.Append(resp.State.Set(ctx, state)...)
-			if resp.Diagnostics.HasError() {
-				return
-			}
-
-			if state.Status.ValueString() == "Running" {
-				break loop
-			}
+			continue
 
 		}
 	}
@@ -311,6 +325,14 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	cli := clusterservice.NewClusterClient(c.cli)
 
+	_, err = cli.DeleteCluster(ctx, &clusterservice.DeleteClusterRequest{
+		ClusterId: state.ID.ValueString(),
+	})
+	if err != nil {
+		resp.Diagnostics.AddError("failed to delete cluster", err.Error())
+		return
+	}
+
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -334,13 +356,13 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 			if lastErr != nil {
 				resp.Diagnostics.AddError("failed to delete cluster", lastErr.Msg)
-				return
 			} else {
 				resp.Diagnostics.AddError(
 					"failed to delete cluster",
 					"cluster in the invalid state",
 				)
 			}
+			return
 		}
 
 		select {
@@ -530,6 +552,7 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		select {
 		case <-ctx.Done():
 			resp.Diagnostics.AddError("failed to update cluster", ctx.Err().Error())
+			return
 		case <-ticker.C:
 			continue
 		}
