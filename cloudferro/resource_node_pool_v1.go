@@ -252,27 +252,6 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	return diags
 }
 
-func (c *nodePoolResource) create(ctx context.Context, req *nodepoolservice.CreateNodePoolRequest) (*nodepool.NodePool, error) {
-	cli := nodepoolservice.NewNodePoolClient(c.cli)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		result, err := cli.CreateNodePool(ctx, req)
-		if st, ok := status.FromError(err); ok && st.Message() == "cluster is busy" {
-			tflog.Debug(ctx, "cluster is busy, waiting for it to be not busy")
-		} else {
-			return result, err
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-ticker.C:
-			continue
-		}
-	}
-}
-
 // Create implements resource.Resource.
 func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	var state nodePoolModel
@@ -285,12 +264,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ClusterID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("failed to create node pool", err.Error())
-		return
-	}
-
+	npCli := nodepoolservice.NewNodePoolClient(c.cli)
 	msCli := machinespecservice.NewMachineSpecClient(c.cli)
 
 	var sharedNetworks []string
@@ -362,7 +336,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
-	nodePool, err := c.create(ctx, &nodepoolservice.CreateNodePoolRequest{
+	nodePool, err := npCli.CreateNodePool(ctx, &nodepoolservice.CreateNodePoolRequest{
 		ClusterId: clusterID,
 		NodePool: &nodepoolservice.NodePoolCreate{
 			MachineSpec: &nodepoolservice.NodePoolCreate_MachineSpec{
@@ -425,29 +399,6 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 	}
 }
 
-func (c *nodePoolResource) delete(ctx context.Context, req *nodepoolservice.DeleteNodePoolRequest) error {
-	cli := nodepoolservice.NewNodePoolClient(c.cli)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-
-		_, err := cli.DeleteNodePool(ctx, req)
-		if st, ok := status.FromError(err); ok && st.Message() == "cluster is busy" {
-			tflog.Debug(ctx, "cluster is busy, waiting for it to be not busy")
-		} else {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			continue
-		}
-	}
-}
-
 // Delete implements resource.Resource.
 func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	var state nodePoolModel
@@ -464,12 +415,6 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 	mutex := getResourceMutex(state.ClusterID.ValueString())
 	mutex.Lock()
 	defer mutex.Unlock()
-
-	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ClusterID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("failed to delete node pool", err.Error())
-		return
-	}
 
 	nodePoolID := state.ID.ValueString()
 	clusterID := state.ClusterID.ValueString()
@@ -491,7 +436,7 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 
 	if nodePool.Status == "Running" || nodePool.Status == "Error" {
 		tflog.Debug(ctx, "node pool is running or in error, deleting it")
-		err = c.delete(ctx, &nodepoolservice.DeleteNodePoolRequest{
+		_, err = cli.DeleteNodePool(ctx, &nodepoolservice.DeleteNodePoolRequest{
 			ClusterId:  clusterID,
 			NodePoolId: nodePoolID,
 		})
@@ -504,7 +449,7 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 		}
 
 	} else if nodePool.Status != "Deleting" {
-		lastErr, err := utils.GetLatestError(ctx, c.cli, state.ClusterID.ValueString())
+		lastErr, err := utils.GetLatestClusterError(ctx, c.cli, state.ClusterID.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError("failed to refresh delete node pool", err.Error())
 		}
@@ -538,7 +483,7 @@ func (c *nodePoolResource) Delete(ctx context.Context, req resource.DeleteReques
 		}
 
 		if np.Status == "Error" {
-			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
 			if err != nil {
 				resp.Diagnostics.AddError("failed to delete node pool", "unknown error")
 				return
@@ -733,29 +678,6 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 	}
 }
 
-func (c *nodePoolResource) update(ctx context.Context, req *nodepoolservice.UpdateNodePoolRequest) error {
-	cli := nodepoolservice.NewNodePoolClient(c.cli)
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-
-		_, err := cli.UpdateNodePool(ctx, req)
-		if st, ok := status.FromError(err); ok && st.Message() == "cluster is busy" {
-			tflog.Debug(ctx, "cluster is busy, waiting for it to be not busy")
-		} else {
-			return err
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			continue
-		}
-	}
-}
-
 // Update implements resource.Resource.
 func (c *nodePoolResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	var current nodePoolModel
@@ -773,12 +695,6 @@ func (c *nodePoolResource) Update(ctx context.Context, req resource.UpdateReques
 	mutex := getResourceMutex(current.ClusterID.ValueString())
 	mutex.Lock()
 	defer mutex.Unlock()
-
-	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, current.ClusterID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError("failed to update node pool", err.Error())
-		return
-	}
 
 	clusterID := current.ClusterID.ValueString()
 	nodePoolID := current.ID.ValueString()
@@ -803,13 +719,13 @@ func (c *nodePoolResource) Update(ctx context.Context, req resource.UpdateReques
 	defer ticker.Stop()
 
 	tflog.Info(ctx, "updating node pool", map[string]any{"object": nodePool})
-	err = c.update(ctx, &nodepoolservice.UpdateNodePoolRequest{
+	_, err = cli.UpdateNodePool(ctx, &nodepoolservice.UpdateNodePoolRequest{
 		ClusterId:  clusterID,
 		NodePoolId: nodePoolID,
 		NodePool:   nodePool,
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("failed to udpate node pool", err.Error())
+		resp.Diagnostics.AddError("failed to update node pool", err.Error())
 		return
 	}
 
@@ -830,7 +746,7 @@ func (c *nodePoolResource) Update(ctx context.Context, req resource.UpdateReques
 		}
 
 		if current.Status.ValueString() == "Error" {
-			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
 			if err != nil {
 				resp.Diagnostics.AddError("failed to update node pool", "unknown error")
 				return

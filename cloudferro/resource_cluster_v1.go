@@ -185,7 +185,7 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	}
 
 	if klaster.Status == "Error" && len(klaster.Errors) > 0 {
-		lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+		lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
 		if err != nil {
 			diags.AddError("failed to refresh cluster state", err.Error())
 			return diags
@@ -315,16 +315,9 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 	clusterID := state.ID.ValueString()
 
-	err := utils.WaitForClusterToNotBeBusy(ctx, c.cli, state.ID.ValueString())
-	if st, ok := status.FromError(err); ok && st.Code() == codes.NotFound {
-		return
-	} else if err != nil {
-		resp.Diagnostics.AddError("failed to delete cluster", err.Error())
-		return
-	}
-
 	cli := clusterservice.NewClusterClient(c.cli)
 
+	var err error
 	_, err = cli.DeleteCluster(ctx, &clusterservice.DeleteClusterRequest{
 		ClusterId: state.ID.ValueString(),
 	})
@@ -348,7 +341,7 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 		}
 
 		if cl.Status == "Error" {
-			lastErr, err := utils.GetLatestError(ctx, c.cli, clusterID)
+			lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
 			if err != nil {
 				resp.Diagnostics.AddError("failed to delete cluster", err.Error())
 				return
