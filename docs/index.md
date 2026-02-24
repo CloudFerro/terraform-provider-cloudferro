@@ -25,7 +25,7 @@ provider "cloudferro" {
 
 ### Optional
 
-- `host` (String) Address of the CloudFerro Managed Kubernetes service. Should be in the form of <host>:<port> or <host> if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set.
+- `host` (String) Address of the CloudFerro Managed Kubernetes service. Should be in the form of `host:port` or `host` if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set. Should be only really used for private endpoints.
 - `region` (String) Region of the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_REGION` environment variable is set.
 - `server_cert` (String) Path to a PEM-encoded certificate file for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_CERT` environment variable is set.
 - `token` (String, Sensitive) API Token for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_TOKEN` environment variable is set.

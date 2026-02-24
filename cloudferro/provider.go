@@ -245,8 +245,10 @@ func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaReques
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Optional:    true,
-				Description: "Address of the CloudFerro Managed Kubernetes service. Should be in the form of <host>:<port> or <host> if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set.",
+				Optional: true,
+				Description: "Address of the CloudFerro Managed Kubernetes service. Should be in the form of `host:port` " +
+					"or `host` if port is 443. Can be omitted if the `CLOUDFERRO_HOST` environment variable is set. " +
+					"Should be only really used for private endpoints.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(
 						path.MatchRelative().AtParent().AtName("region"),
@@ -254,17 +256,20 @@ func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaReques
 				},
 			},
 			"token": schema.StringAttribute{
-				Optional:    true,
-				Sensitive:   true,
-				Description: "API Token for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_TOKEN` environment variable is set.",
+				Optional:  true,
+				Sensitive: true,
+				Description: "API Token for the CloudFerro Managed Kubernetes service. Can be omitted if " +
+					"the `CLOUDFERRO_TOKEN` environment variable is set.",
 			},
 			"server_cert": schema.StringAttribute{
-				Optional:    true,
-				Description: "Path to a PEM-encoded certificate file for the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_CERT` environment variable is set.",
+				Optional: true,
+				Description: "Path to a PEM-encoded certificate file for the CloudFerro Managed Kubernetes service. " +
+					"Can be omitted if the `CLOUDFERRO_CERT` environment variable is set.",
 			},
 			"region": schema.StringAttribute{
-				Optional:    true,
-				Description: "Region of the CloudFerro Managed Kubernetes service. Can be omitted if the `CLOUDFERRO_REGION` environment variable is set.",
+				Optional: true,
+				Description: "Region of the CloudFerro Managed Kubernetes service. Can be omitted if " +
+					"the `CLOUDFERRO_REGION` environment variable is set.",
 			},
 		},
 	}
