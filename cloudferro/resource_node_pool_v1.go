@@ -24,6 +24,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+	"gitlab.cloudferro.com/k8s/api/machinespec/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepool/v1"
 	"gitlab.cloudferro.com/k8s/api/nodepoolservice/v1"
@@ -318,6 +319,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 		}
 	}
 
+	var machineSpec *machinespec.MachineSpec
 	machineSpecs, err := msCli.List(ctx, &machinespecservice.ListRequest{
 		Name: state.Flavor.ValueStringPointer(),
 	})
@@ -326,8 +328,15 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 		return
 	}
 
-	if len(machineSpecs.Items) != 1 {
-		resp.Diagnostics.AddError("failde to create node pool", "flavor not found")
+	for _, el := range machineSpecs.Items {
+		if el.GetName() == state.Flavor.ValueString() {
+			machineSpec = el
+			break
+		}
+	}
+
+	if machineSpec == nil {
+		resp.Diagnostics.AddError("failed to create node pool", "flavor not found")
 		return
 	}
 
@@ -340,7 +349,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 		ClusterId: clusterID,
 		NodePool: &nodepoolservice.NodePoolCreate{
 			MachineSpec: &nodepoolservice.NodePoolCreate_MachineSpec{
-				Id: machineSpecs.GetItems()[0].GetId(),
+				Id: machineSpec.Id,
 			},
 			Name:           state.Name.ValueStringPointer(),
 			Size:           state.Size.ValueInt32Pointer(),

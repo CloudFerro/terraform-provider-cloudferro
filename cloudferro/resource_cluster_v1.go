@@ -21,7 +21,9 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
+	"gitlab.cloudferro.com/k8s/api/kubernetesversion/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
+	"gitlab.cloudferro.com/k8s/api/machinespec/v1"
 	"gitlab.cloudferro.com/k8s/api/machinespecservice/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -210,6 +212,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	versionCli := kubernetesversionservice.NewKubernetesVersionClient(c.cli)
 	machineCli := machinespecservice.NewMachineSpecClient(c.cli)
 
+	var machineSpec *machinespec.MachineSpec
 	machines, err := machineCli.List(ctx, &machinespecservice.ListRequest{
 		Name: state.ControlPlane.Flavor.ValueStringPointer(),
 	})
@@ -218,11 +221,18 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	if len(machines.GetItems()) != 1 {
-		resp.Diagnostics.AddError("failed to create cluster", "failed to find flavor")
+	for _, el := range machines.GetItems() {
+		if el.GetName() == state.ControlPlane.Flavor.ValueString() {
+			machineSpec = el
+			break
+		}
+	}
+	if machineSpec == nil {
+		resp.Diagnostics.AddError("failed to create cluster", "control plane flavor not found")
 		return
 	}
 
+	var version *kubernetesversion.KubernetesVersion
 	versions, err := versionCli.List(ctx, &kubernetesversionservice.ListRequest{
 		Version: state.Version.ValueStringPointer(),
 	})
@@ -231,8 +241,15 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	if len(versions.GetItems()) != 1 {
-		resp.Diagnostics.AddError("failed to create cluster", "failed to find kubernetes version")
+	for _, el := range versions.GetItems() {
+		if el.GetVersion() == state.Version.ValueString() {
+			version = el
+			break
+		}
+	}
+
+	if version == nil {
+		resp.Diagnostics.AddError("failed to create cluster", "version not found")
 		return
 	}
 
@@ -240,14 +257,14 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 		Cluster: &clusterservice.CreateCluster{
 			Name: state.Name.ValueString(),
 			KubernetesVersion: &clusterservice.CreateCluster_KubernetesVersion{
-				Id: versions.GetItems()[0].GetId(),
+				Id: version.Id,
 			},
 			ControlPlane: &clusterservice.CreateCluster_ControlPlane{
 				Value: &clusterservice.CreateCluster_ControlPlane_Custom{
 					Custom: &clusterservice.CreateCluster_ControlPlaneCustom{
 						Size: state.ControlPlane.Size.ValueInt32(),
 						MachineSpec: &clusterservice.CreateCluster_MachineSpec{
-							Id: machines.GetItems()[0].GetId(),
+							Id: machineSpec.Id,
 						},
 					},
 				},
