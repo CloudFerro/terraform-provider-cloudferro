@@ -362,7 +362,7 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 		},
 	})
 	if err != nil {
-		resp.Diagnostics.AddError("failed to create node pool", ctx.Err().Error())
+		resp.Diagnostics.AddError("failed to create node pool", err.Error())
 		return
 	}
 
