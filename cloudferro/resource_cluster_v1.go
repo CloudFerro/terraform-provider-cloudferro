@@ -94,7 +94,7 @@ func (c *clusterResource) ImportState(
 
 	state.ID = types.StringValue(req.ID)
 
-	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -123,7 +123,7 @@ func (c *clusterResource) Configure(
 	c.cli = state.Cli
 }
 
-func (c *clusterResource) refreshClusterState(ctx context.Context, state *clusterModel) diag.Diagnostics {
+func (c *clusterResource) refreshClusterState(ctx context.Context, state *clusterModel, loadErrors bool) diag.Diagnostics {
 	clusterID := state.ID.ValueString()
 	var diags diag.Diagnostics
 
@@ -151,6 +151,9 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	}
 
 	if klaster.GetStatus() == "Running" {
+
+		diags.AddWarning("deprecated", "current version of the provider is using deprecated method of getting kubeconfig, you should upgrade to the latest version of the provider")
+
 		files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
 			ClusterId: clusterID,
 		})
@@ -186,15 +189,18 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		)
 	}
 
-	if klaster.Status == "Error" && len(klaster.Errors) > 0 {
-		lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
-		if err != nil {
-			diags.AddError("failed to refresh cluster state", err.Error())
-			return diags
+	if klaster.Status == "Error" && loadErrors {
+		if len(klaster.Errors) > 0 {
+			lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
+			if err != nil {
+				diags.AddError("failed to refresh cluster state", err.Error())
+				return diags
+			}
+
+			diags.AddError("failed to refresh cluster state", lastErr.Msg)
+		} else {
+			diags.AddError("failed to refresh cluster state", "unknown error")
 		}
-
-		diags.AddError("failed to refresh cluster state", lastErr.Msg)
-
 	}
 
 	return diags
@@ -278,7 +284,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 
 	// update current state with id's
 	state.ID = types.StringValue(result.Id)
-	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state, true)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -292,7 +298,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 	defer ticker.Stop()
 
 	for {
-		resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
+		resp.Diagnostics.Append(c.refreshClusterState(ctx, &state, true)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
@@ -367,10 +373,7 @@ func (c *clusterResource) Delete(ctx context.Context, req resource.DeleteRequest
 			if lastErr != nil {
 				resp.Diagnostics.AddError("failed to delete cluster", lastErr.Msg)
 			} else {
-				resp.Diagnostics.AddError(
-					"failed to delete cluster",
-					"cluster in the invalid state",
-				)
+				resp.Diagnostics.AddError("failed to delete cluster", "cluster in the invalid state")
 			}
 			return
 		}
@@ -402,7 +405,7 @@ func (c *clusterResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state)...)
+	resp.Diagnostics.Append(c.refreshClusterState(ctx, &state, false)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -545,7 +548,7 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 	defer ticker.Stop()
 
 	for {
-		resp.Diagnostics.Append(c.refreshClusterState(ctx, &current)...)
+		resp.Diagnostics.Append(c.refreshClusterState(ctx, &current, true)...)
 		if resp.Diagnostics.HasError() {
 			return
 		}
