@@ -182,6 +182,8 @@ gitlab.cloudferro.com/k8s/api v0.7.2-0.20251118090859-e5d68feae2de h1:AE2O1co84t
 gitlab.cloudferro.com/k8s/api v0.7.2-0.20251118090859-e5d68feae2de/go.mod h1:DOA7DuCIsc5/dVSNyt5dVEZBck2cOzJ7K9uQkRmgqcw=
 gitlab.cloudferro.com/k8s/api v0.8.1-0.20251209135641-3ca5588ecae0 h1:QP4o97Gh7ZSvVccvcdjiYxU6s54scQvmxWZ4e4u1ZJ0=
 gitlab.cloudferro.com/k8s/api v0.8.1-0.20251209135641-3ca5588ecae0/go.mod h1:DOA7DuCIsc5/dVSNyt5dVEZBck2cOzJ7K9uQkRmgqcw=
+gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8 h1:3YJskQeD+6lfsNPdo5OjZC8oenaeiHLuQl57/6XR9hE=
+gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8/go.mod h1:DOA7DuCIsc5/dVSNyt5dVEZBck2cOzJ7K9uQkRmgqcw=
 go.abhg.dev/goldmark/frontmatter v0.2.0 h1:P8kPG0YkL12+aYk2yU3xHv4tcXzeVnN+gU0tJ5JnxRw=
 go.abhg.dev/goldmark/frontmatter v0.2.0/go.mod h1:XqrEkZuM57djk7zrlRUB02x8I5J0px76YjkOzhB4YlU=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=

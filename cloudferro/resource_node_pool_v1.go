@@ -18,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int32planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -56,18 +57,19 @@ type taintModel struct {
 }
 
 type nodePoolModel struct {
-	ClusterID      types.String `tfsdk:"cluster_id"`
-	ID             types.String `tfsdk:"id"`
-	Status         types.String `tfsdk:"-"`
-	Name           types.String `tfsdk:"name"`
-	Flavor         types.String `tfsdk:"flavor"`
-	Autoscale      types.Bool   `tfsdk:"autoscale"`
-	Size           types.Int32  `tfsdk:"size"`
-	SizeMin        types.Int32  `tfsdk:"size_min"`
-	SizeMax        types.Int32  `tfsdk:"size_max"`
-	SharedNetworks types.List   `tfsdk:"shared_networks"`
-	Taints         types.List   `tfsdk:"taints"`
-	Labels         types.List   `tfsdk:"labels"`
+	ClusterID           types.String `tfsdk:"cluster_id"`
+	ID                  types.String `tfsdk:"id"`
+	Status              types.String `tfsdk:"-"`
+	Name                types.String `tfsdk:"name"`
+	Flavor              types.String `tfsdk:"flavor"`
+	Autoscale           types.Bool   `tfsdk:"autoscale"`
+	Size                types.Int32  `tfsdk:"size"`
+	SizeMin             types.Int32  `tfsdk:"size_min"`
+	SizeMax             types.Int32  `tfsdk:"size_max"`
+	SharedNetworks      types.List   `tfsdk:"shared_networks"`
+	Taints              types.List   `tfsdk:"taints"`
+	Labels              types.List   `tfsdk:"labels"`
+	AdditionalVolumeGib types.Int32  `tfsdk:"additional_volume_gib"`
 }
 
 type nodePoolResource struct {
@@ -170,6 +172,7 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	state.Size = types.Int32PointerValue(nodePool.Size)
 	state.SizeMax = types.Int32PointerValue(nodePool.SizeMax)
 	state.SizeMin = types.Int32PointerValue(nodePool.SizeMin)
+	state.AdditionalVolumeGib = types.Int32Value(nodePool.AdditionalVolumeSizeGib)
 
 	var sharedNetworks []attr.Value
 	for _, el := range nodePool.SharedNetworks {
@@ -351,14 +354,15 @@ func (c *nodePoolResource) Create(ctx context.Context, req resource.CreateReques
 			MachineSpec: &nodepoolservice.NodePoolCreate_MachineSpec{
 				Id: machineSpec.Id,
 			},
-			Name:           state.Name.ValueStringPointer(),
-			Size:           state.Size.ValueInt32Pointer(),
-			SizeMin:        state.SizeMin.ValueInt32Pointer(),
-			SizeMax:        state.SizeMax.ValueInt32Pointer(),
-			Autoscale:      state.Autoscale.ValueBool(),
-			SharedNetworks: sharedNetworks,
-			Labels:         labels,
-			Taints:         taints,
+			Name:                    state.Name.ValueStringPointer(),
+			Size:                    state.Size.ValueInt32Pointer(),
+			SizeMin:                 state.SizeMin.ValueInt32Pointer(),
+			SizeMax:                 state.SizeMax.ValueInt32Pointer(),
+			Autoscale:               state.Autoscale.ValueBool(),
+			SharedNetworks:          sharedNetworks,
+			Labels:                  labels,
+			Taints:                  taints,
+			AdditionalVolumeSizeGib: state.AdditionalVolumeGib.ValueInt32(),
 		},
 	})
 	if err != nil {
@@ -603,6 +607,7 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "Size of the static node pool.",
 				Optional:    true,
 				Validators: []validator.Int32{
+					int32validator.AtLeast(0),
 					int32validator.ConflictsWith(
 						path.MatchRelative().AtParent().AtName("size_min"),
 						path.MatchRelative().AtParent().AtName("size_max"),
@@ -613,6 +618,7 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "Minimum size of the node pool when autoscale is turn on.",
 				Optional:    true,
 				Validators: []validator.Int32{
+					int32validator.AtLeast(0),
 					int32validator.AlsoRequires(
 						path.MatchRelative().AtParent().AtName("size_max"),
 					),
@@ -622,6 +628,7 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 				Description: "Maximum size of the node pool when autoscale is turn on.",
 				Optional:    true,
 				Validators: []validator.Int32{
+					int32validator.AtLeast(0),
 					int32validator.AlsoRequires(
 						path.MatchRelative().AtParent().AtName("size_min"),
 					),
@@ -681,6 +688,14 @@ func (c *nodePoolResource) Schema(ctx context.Context, req resource.SchemaReques
 							},
 						},
 					},
+				},
+			},
+			"additional_volume_gib": schema.Int32Attribute{
+				Description:   "Size of volume attached to each node used for storing images, EmptyDirs, etc. in Gib",
+				Optional:      true,
+				PlanModifiers: []planmodifier.Int32{int32planmodifier.RequiresReplace()},
+				Validators: []validator.Int32{
+					int32validator.AtLeast(0),
 				},
 			},
 		},

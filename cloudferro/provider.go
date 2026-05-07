@@ -15,9 +15,55 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
+
+func tflogUnaryInterceptor(
+	ctx context.Context,
+	method string,
+	req, reply any,
+	cc *grpc.ClientConn,
+	invoker grpc.UnaryInvoker,
+	opts ...grpc.CallOption,
+) error {
+	tflog.Debug(ctx, "grpc call", map[string]any{"method": method, "target": cc.Target()})
+	err := invoker(ctx, method, req, reply, cc, opts...)
+	if err != nil {
+		st, _ := status.FromError(err)
+		tflog.Debug(ctx, "grpc call failed", map[string]any{
+			"method":  method,
+			"code":    st.Code().String(),
+			"message": st.Message(),
+		})
+	} else {
+		tflog.Debug(ctx, "grpc call succeeded", map[string]any{"method": method})
+	}
+	return err
+}
+
+func tflogStreamInterceptor(
+	ctx context.Context,
+	desc *grpc.StreamDesc,
+	cc *grpc.ClientConn,
+	method string,
+	streamer grpc.Streamer,
+	opts ...grpc.CallOption,
+) (grpc.ClientStream, error) {
+	tflog.Debug(ctx, "grpc stream", map[string]any{"method": method, "target": cc.Target()})
+	cs, err := streamer(ctx, desc, cc, method, opts...)
+	if err != nil {
+		st, _ := status.FromError(err)
+		tflog.Debug(ctx, "grpc stream failed", map[string]any{
+			"method":  method,
+			"code":    st.Code().String(),
+			"message": st.Message(),
+		})
+	}
+	return cs, err
+}
 
 var (
 	hostPrefix = "managed-kubernetes"
@@ -205,6 +251,8 @@ func (m *CloudFerroProvider) Configure(
 		grpc.WithDefaultCallOptions(
 			grpc.PerRPCCredentials(tokenAuth{token: token}),
 		),
+		grpc.WithUnaryInterceptor(tflogUnaryInterceptor),
+		grpc.WithStreamInterceptor(tflogStreamInterceptor),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(
