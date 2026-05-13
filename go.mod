@@ -10,6 +10,7 @@ require (
 	github.com/hashicorp/terraform-plugin-log v0.9.0
 	gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8
 	google.golang.org/grpc v1.72.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -72,5 +73,4 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250303144028-a0af3efb3deb // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

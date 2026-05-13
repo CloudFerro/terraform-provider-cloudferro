@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cloudferro/terraform-provider-cloudferro/internal/kubeconfig"
 	"github.com/cloudferro/terraform-provider-cloudferro/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-framework-validators/int32validator"
@@ -19,7 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"gitlab.cloudferro.com/k8s/api/clusterservice/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversion/v1"
 	"gitlab.cloudferro.com/k8s/api/kubernetesversionservice/v1"
@@ -60,13 +60,21 @@ type clusterModelControlPlane struct {
 	Flavor types.String `tfsdk:"flavor"`
 }
 
+type clusterKubeconfig struct {
+	Raw           types.String `tfsdk:"raw"`
+	Host          types.String `tfsdk:"host"`
+	ClientCert    types.String `tfsdk:"client_certificate"`
+	ClientKey     types.String `tfsdk:"client_key"`
+	ClusterCaCert types.String `tfsdk:"cluster_ca_certificate"`
+}
+
 type clusterModel struct {
 	ID           types.String             `tfsdk:"id"`
 	Name         types.String             `tfsdk:"name"`
 	Status       types.String             `tfsdk:"-"`
 	Version      types.String             `tfsdk:"version"`
 	ControlPlane clusterModelControlPlane `tfsdk:"control_plane"`
-	Kubeconfig   types.String             `tfsdk:"kubeconfig"`
+	Kubeconfig   *clusterKubeconfig       `tfsdk:"kubeconfig"`
 	Metadata     types.Object             `tfsdk:"metadata"`
 	RouterIP     types.String             `tfsdk:"router_ip"`
 }
@@ -90,6 +98,7 @@ func (c *clusterResource) ImportState(
 
 	if _, err := uuid.Parse(req.ID); err != nil {
 		resp.Diagnostics.AddError("failed to import state", "cluster_id must be valid uuid")
+		return
 	}
 
 	state.ID = types.StringValue(req.ID)
@@ -144,6 +153,7 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	state.Version = types.StringValue(klaster.GetVersion().GetVersion())
 	state.ControlPlane.Size = types.Int32Value(klaster.GetControlPlane().GetCustom().GetSize())
 	state.ControlPlane.Flavor = types.StringValue(klaster.GetControlPlane().GetCustom().GetMachineSpec().GetName())
+
 	if klaster.GetRouterIp() != "" {
 		state.RouterIP = types.StringValue(klaster.GetRouterIp())
 	} else if state.RouterIP.IsUnknown() {
@@ -151,20 +161,23 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	}
 
 	if klaster.GetStatus() == "Running" {
+		if state.Kubeconfig == nil {
 
-		diags.AddWarning("deprecated", "current version of the provider is using deprecated method of getting kubeconfig, you should upgrade to the latest version of the provider")
+			files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
+				ClusterId: clusterID,
+			})
+			if err != nil {
+				diags.AddError("failed to refresh cluster state", err.Error())
+				return diags
+			}
 
-		files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
-			ClusterId: clusterID,
-		})
-		if err != nil {
-			diags.AddError("failed to refresh cluster state", err.Error())
-			return diags
+			state.Kubeconfig, err = kubeconfigFromConfig(files.GetKubeconfig())
+			if err != nil {
+				diags.AddError("failed to refresh cluster state", err.Error())
+				return diags
+			}
+
 		}
-
-		state.Kubeconfig = types.StringValue(files.GetKubeconfig())
-	} else if state.Kubeconfig.IsUnknown() {
-		state.Kubeconfig = types.StringNull()
 	}
 
 	if metadata := klaster.GetMetadata(); metadata != nil {
@@ -466,10 +479,33 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 					},
 				},
 			},
-			"kubeconfig": schema.StringAttribute{
+			"kubeconfig": schema.SingleNestedAttribute{
 				Computed:    true,
-				Sensitive:   true,
 				Description: "Cluster kubeconfig. Should be used with kubectl to interact with the cluster.",
+				Attributes: map[string]schema.Attribute{
+					"raw": schema.StringAttribute{
+						Computed:    true,
+						Sensitive:   true,
+						Description: "Raw kubeconfig. Should be used with kubectl to interact with the cluster.",
+					},
+					"host": schema.StringAttribute{
+						Computed:    true,
+						Description: "The host of the kubernetes cluster.",
+					},
+					"client_certificate": schema.StringAttribute{
+						Computed:    true,
+						Description: "The client certificate for the kubernetes cluster.",
+					},
+					"client_key": schema.StringAttribute{
+						Computed:    true,
+						Sensitive:   true,
+						Description: "The client key for the kubernetes cluster.",
+					},
+					"cluster_ca_certificate": schema.StringAttribute{
+						Computed:    true,
+						Description: "The cluster CA certificate for the kubernetes cluster.",
+					},
+				},
 			},
 			"metadata": schema.SingleNestedAttribute{
 				Computed:    true,
@@ -534,7 +570,6 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	klaster.Version.Id = versions.GetItems()[0].GetId()
 
-	tflog.Info(ctx, "update cluser", map[string]any{"object": klaster})
 	_, err = cli.UpdateCluster(ctx, &clusterservice.UpdateClusterRequest{
 		ClusterId: clusterID,
 		Update:    klaster,
@@ -570,4 +605,59 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 			continue
 		}
 	}
+}
+
+func kubeconfigFromConfig(raw string) (*clusterKubeconfig, error) {
+	config, err := kubeconfig.Parse(raw)
+	if err != nil {
+		return nil, err
+	}
+
+	currentContext := config.CurrentContext
+	if currentContext == "" {
+		for _, ctx := range config.Contexts {
+			currentContext = ctx.Name
+			break
+		}
+	}
+
+	var context *kubeconfig.Context
+	for _, ctx := range config.Contexts {
+		if ctx.Name == currentContext {
+			context = &ctx.Context
+			break
+		}
+	}
+
+	if context == nil {
+		return &clusterKubeconfig{}, nil
+	}
+
+	var cluster *kubeconfig.Cluster
+	var user *kubeconfig.User
+
+	for _, cl := range config.Clusters {
+		if cl.Name == context.Cluster {
+			cluster = &cl.Cluster
+			break
+		}
+	}
+
+	for _, au := range config.AuthInfos {
+		if au.Name == context.User {
+			user = &au.User
+		}
+	}
+
+	if cluster == nil || user == nil {
+		return &clusterKubeconfig{}, nil
+	}
+
+	return &clusterKubeconfig{
+		Raw:           types.StringValue(raw),
+		Host:          types.StringValue(cluster.Server),
+		ClientCert:    types.StringValue(user.ClientCertificateData),
+		ClientKey:     types.StringValue(user.ClientKeyData),
+		ClusterCaCert: types.StringValue(cluster.CertificateAuthorityData),
+	}, nil
 }

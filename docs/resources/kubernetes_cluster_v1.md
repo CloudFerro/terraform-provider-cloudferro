@@ -35,7 +35,7 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
 ### Read-Only
 
 - `id` (String) Id of the cluster.
-- `kubeconfig` (String, Sensitive) Cluster kubeconfig. Should be used with kubectl to interact with the cluster.
+- `kubeconfig` (Attributes) Cluster kubeconfig. Should be used with kubectl to interact with the cluster. (see [below for nested schema](#nestedatt--kubeconfig))
 - `metadata` (Attributes) Cluster metadata. (see [below for nested schema](#nestedatt--metadata))
 - `router_ip` (String) Address of the cluster gateway.
 
@@ -46,6 +46,18 @@ Required:
 
 - `flavor` (String) Machine flavor to use for control plane.
 - `size` (Number) Size of the control plane.
+
+
+<a id="nestedatt--kubeconfig"></a>
+### Nested Schema for `kubeconfig`
+
+Read-Only:
+
+- `client_certificate` (String) The client certificate for the kubernetes cluster.
+- `client_key` (String, Sensitive) The client key for the kubernetes cluster.
+- `cluster_ca_certificate` (String) The cluster CA certificate for the kubernetes cluster.
+- `host` (String) The host of the kubernetes cluster.
+- `raw` (String, Sensitive) Raw kubeconfig. Should be used with kubectl to interact with the cluster.
 
 
 <a id="nestedatt--metadata"></a>
