@@ -68,13 +68,21 @@ type clusterKubeconfig struct {
 	ClusterCaCert types.String `tfsdk:"cluster_ca_certificate"`
 }
 
+var kubeconfigType = map[string]attr.Type{
+	"raw":                    types.StringType,
+	"host":                   types.StringType,
+	"client_certificate":     types.StringType,
+	"client_key":             types.StringType,
+	"cluster_ca_certificate": types.StringType,
+}
+
 type clusterModel struct {
 	ID           types.String             `tfsdk:"id"`
 	Name         types.String             `tfsdk:"name"`
 	Status       types.String             `tfsdk:"-"`
 	Version      types.String             `tfsdk:"version"`
 	ControlPlane clusterModelControlPlane `tfsdk:"control_plane"`
-	Kubeconfig   *clusterKubeconfig       `tfsdk:"kubeconfig"`
+	Kubeconfig   types.Object             `tfsdk:"kubeconfig"`
 	Metadata     types.Object             `tfsdk:"metadata"`
 	RouterIP     types.String             `tfsdk:"router_ip"`
 }
@@ -160,9 +168,12 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		state.RouterIP = types.StringNull()
 	}
 
-	if klaster.GetStatus() == "Running" {
-		if state.Kubeconfig == nil {
+	if state.Kubeconfig.IsUnknown() {
+		state.Kubeconfig = types.ObjectNull(kubeconfigType)
+	}
 
+	if klaster.GetStatus() == "Running" {
+		if state.Kubeconfig.IsNull() {
 			files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
 				ClusterId: clusterID,
 			})
@@ -171,9 +182,16 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 				return diags
 			}
 
-			state.Kubeconfig, err = kubeconfigFromConfig(files.GetKubeconfig())
+			config, err := kubeconfigFromConfig(files.GetKubeconfig())
 			if err != nil {
 				diags.AddError("failed to refresh cluster state", err.Error())
+				return diags
+			}
+
+			var configDiags diag.Diagnostics
+			state.Kubeconfig, configDiags = types.ObjectValueFrom(ctx, kubeconfigType, config)
+			diags.Append(configDiags...)
+			if diags.HasError() {
 				return diags
 			}
 
