@@ -172,7 +172,11 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 	state.Size = types.Int32PointerValue(nodePool.Size)
 	state.SizeMax = types.Int32PointerValue(nodePool.SizeMax)
 	state.SizeMin = types.Int32PointerValue(nodePool.SizeMin)
-	state.AdditionalVolumeGib = types.Int32Value(nodePool.AdditionalVolumeSizeGib)
+	if nodePool.AdditionalVolumeSizeGib != 0 {
+		state.AdditionalVolumeGib = types.Int32Value(nodePool.AdditionalVolumeSizeGib)
+	} else if state.AdditionalVolumeGib.IsUnknown() {
+		state.AdditionalVolumeGib = types.Int32Null()
+	}
 
 	var sharedNetworks []attr.Value
 	for _, el := range nodePool.SharedNetworks {
