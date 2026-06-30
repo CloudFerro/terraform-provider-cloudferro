@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/terraform-plugin-framework v1.14.1
 	github.com/hashicorp/terraform-plugin-framework-validators v0.17.0
 	github.com/hashicorp/terraform-plugin-log v0.9.0
-	gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8
+	gitlab.cloudferro.com/k8s/api v0.13.1
 	google.golang.org/grpc v1.72.0
 	gopkg.in/yaml.v3 v3.0.1
 )

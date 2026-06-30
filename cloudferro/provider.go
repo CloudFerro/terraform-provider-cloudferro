@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"os"
+	"runtime"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -18,8 +19,33 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
+
+const requestIDKey = "x-request-id"
+
+func requestIDFromMD(mds ...metadata.MD) string {
+	for _, md := range mds {
+		if vals := md.Get(requestIDKey); len(vals) > 0 {
+			return vals[0]
+		}
+	}
+	return ""
+}
+
+const serviceConfig = `{
+		"methodConfig": [{
+		  "name": [{}],
+		  "waitForReady": true,
+		  "retryPolicy": {
+			  "MaxAttempts": 10,
+			  "InitialBackoff": "1s",
+			  "MaxBackoff": "8s",
+			  "BackoffMultiplier": 2.0,
+			  "RetryableStatusCodes": [ "UNAVAILABLE" ]
+		  }
+		}]}`
 
 func tflogUnaryInterceptor(
 	ctx context.Context,
@@ -30,18 +56,28 @@ func tflogUnaryInterceptor(
 	opts ...grpc.CallOption,
 ) error {
 	tflog.Debug(ctx, "grpc call", map[string]any{"method": method, "target": cc.Target()})
+
+	var header, trailer metadata.MD
+	opts = append(opts, grpc.Header(&header), grpc.Trailer(&trailer))
+
 	err := invoker(ctx, method, req, reply, cc, opts...)
 	if err != nil {
 		st, _ := status.FromError(err)
+		requestID := requestIDFromMD(header, trailer)
 		tflog.Debug(ctx, "grpc call failed", map[string]any{
-			"method":  method,
-			"code":    st.Code().String(),
-			"message": st.Message(),
+			"method":     method,
+			"code":       st.Code().String(),
+			"message":    st.Message(),
+			"request_id": requestID,
 		})
-	} else {
-		tflog.Debug(ctx, "grpc call succeeded", map[string]any{"method": method})
+		if requestID != "" {
+			return fmt.Errorf("%w (x-request-id: %s)", err, requestID)
+		}
+		return err
 	}
-	return err
+
+	tflog.Debug(ctx, "grpc call succeeded", map[string]any{"method": method})
+	return nil
 }
 
 func tflogStreamInterceptor(
@@ -117,10 +153,18 @@ type CloudFerroProvider struct {
 	version string
 }
 
+func (p *CloudFerroProvider) userAgent(terraformVersion string) string {
+	if terraformVersion == "" {
+		terraformVersion = "unknown"
+	}
+	return fmt.Sprintf(
+		"terraform-provider-cloudferro/%s (%s/%s) Terraform/%s",
+		p.version, runtime.GOOS, runtime.GOARCH, terraformVersion,
+	)
+}
+
 // Configure implements provider.Provider.
-func (m *CloudFerroProvider) Configure(
-	c context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse,
-) {
+func (p *CloudFerroProvider) Configure(c context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
 	var config cloudFerroConfigModel
 	resp.Diagnostics.Append(req.Config.Get(c, &config)...)
 	if resp.Diagnostics.HasError() {
@@ -253,6 +297,9 @@ func (m *CloudFerroProvider) Configure(
 		),
 		grpc.WithUnaryInterceptor(tflogUnaryInterceptor),
 		grpc.WithStreamInterceptor(tflogStreamInterceptor),
+		grpc.WithDefaultServiceConfig(serviceConfig),
+		grpc.WithUserAgent(p.userAgent(req.TerraformVersion)),
+		grpc.WithMaxCallAttempts(10),
 	)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -268,20 +315,20 @@ func (m *CloudFerroProvider) Configure(
 }
 
 // DataSources implements provider.Provider.
-func (m *CloudFerroProvider) DataSources(context.Context) []func() datasource.DataSource {
+func (p *CloudFerroProvider) DataSources(context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{}
 }
 
 // Metadata implements provider.Provider.
-func (m *CloudFerroProvider) Metadata(
+func (p *CloudFerroProvider) Metadata(
 	ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse,
 ) {
 	resp.TypeName = "cloudferro"
-	resp.Version = m.version
+	resp.Version = p.version
 }
 
 // Resources implements provider.Provider.
-func (m *CloudFerroProvider) Resources(context.Context) []func() resource.Resource {
+func (p *CloudFerroProvider) Resources(context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		newClusterResource,
 		newNodePoolResource,
@@ -289,7 +336,7 @@ func (m *CloudFerroProvider) Resources(context.Context) []func() resource.Resour
 }
 
 // Schema implements provider.Provider.
-func (m *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
+func (p *CloudFerroProvider) Schema(_ context.Context, req provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{

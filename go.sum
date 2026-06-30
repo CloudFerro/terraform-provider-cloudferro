@@ -180,6 +180,8 @@ github.com/zclconf/go-cty v1.16.2 h1:LAJSwc3v81IRBZyUVQDUdZ7hs3SYs9jv0eZJDWHD/70
 github.com/zclconf/go-cty v1.16.2/go.mod h1:VvMs5i0vgZdhYawQNq5kePSpLAoz8u1xvZgrPIxfnZE=
 gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8 h1:3YJskQeD+6lfsNPdo5OjZC8oenaeiHLuQl57/6XR9hE=
 gitlab.cloudferro.com/k8s/api v0.12.1-0.20260504123924-23695cc1f2b8/go.mod h1:DOA7DuCIsc5/dVSNyt5dVEZBck2cOzJ7K9uQkRmgqcw=
+gitlab.cloudferro.com/k8s/api v0.13.1 h1:rcZliuycIyMEYiQSt3BX0FyPZvh77Phw6+c4NXqRSpE=
+gitlab.cloudferro.com/k8s/api v0.13.1/go.mod h1:DOA7DuCIsc5/dVSNyt5dVEZBck2cOzJ7K9uQkRmgqcw=
 go.abhg.dev/goldmark/frontmatter v0.2.0 h1:P8kPG0YkL12+aYk2yU3xHv4tcXzeVnN+gU0tJ5JnxRw=
 go.abhg.dev/goldmark/frontmatter v0.2.0/go.mod h1:XqrEkZuM57djk7zrlRUB02x8I5J0px76YjkOzhB4YlU=
 go.opentelemetry.io/auto/sdk v1.1.0 h1:cH53jehLUN6UFLY71z+NDOiNJqDdPRaXzTel0sJySYA=
