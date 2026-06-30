@@ -43,7 +43,6 @@ resource "cloudferro_kubernetes_node_pool_v1" "worker" {
 
 ### Optional
 
-- `additional_volume_gib` (Number) Size of volume attached to each node used for storing images, EmptyDirs, etc. in Gib
 - `autoscale` (Boolean) Should node pool autoscale based on the usage? If set size_min and size_max must also be provided.
 - `labels` (Attributes List) List of labels. Must followe standard kubernetes requirements. (see [below for nested schema](#nestedatt--labels))
 - `shared_networks` (List of String) A list of network ids that should be attached to the nodes in the node pool.
