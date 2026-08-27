@@ -37,7 +37,7 @@ qa_tests:
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   trigger:
-    project: "QA/managed-k8s"
+    project: "k8s/managed-k8s"
     branch: "master"
     strategy: depend
     forward:
