@@ -469,10 +469,10 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Required:    true,
 				Description: "Name of the cluster.",
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 64),
+					stringvalidator.LengthBetween(1, 57),
 					stringvalidator.RegexMatches(
-						regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-_ ]*$`),
-						"must start with character and contains only alphanumeric and -_ characters",
+						regexp.MustCompile("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"),
+						"must consist of lowercase alphanumeric characters or '-', and must start and end with an alphanumeric character",
 					),
 				},
 				PlanModifiers: []planmodifier.String{
