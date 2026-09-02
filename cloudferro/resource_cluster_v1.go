@@ -85,6 +85,7 @@ type clusterModel struct {
 	Kubeconfig   types.Object             `tfsdk:"kubeconfig"`
 	Metadata     types.Object             `tfsdk:"metadata"`
 	RouterIP     types.String             `tfsdk:"router_ip"`
+	AllowedCIDRs types.List               `tfsdk:"allowed_cidrs"`
 }
 
 type clusterResource struct {
@@ -220,6 +221,17 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 		)
 	}
 
+	var allowedCIDRs []attr.Value
+	for _, el := range klaster.AllowedCidrs {
+		allowedCIDRs = append(allowedCIDRs, types.StringValue(el))
+	}
+
+	if state.AllowedCIDRs.IsUnknown() || state.AllowedCIDRs.IsNull() {
+		state.AllowedCIDRs = types.ListNull(types.StringType)
+	} else {
+		state.AllowedCIDRs = types.ListValueMust(types.StringType, allowedCIDRs)
+	}
+
 	if klaster.Status == "Error" && loadErrors {
 		if len(klaster.Errors) > 0 {
 			lastErr, err := utils.GetLatestClusterError(ctx, c.cli, clusterID)
@@ -290,6 +302,19 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	var allowedCIDRs []string
+	if !state.AllowedCIDRs.IsUnknown() && !state.AllowedCIDRs.IsNull() {
+		var allowedCIDRsElems []types.String
+		resp.Diagnostics.Append(state.AllowedCIDRs.ElementsAs(ctx, &allowedCIDRsElems, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+
+		for _, el := range allowedCIDRsElems {
+			allowedCIDRs = append(allowedCIDRs, el.ValueString())
+		}
+	}
+
 	result, err := clusterCli.CreateCluster(ctx, &clusterservice.CreateClusterRequest{
 		Cluster: &clusterservice.CreateCluster{
 			Name: state.Name.ValueString(),
@@ -306,6 +331,7 @@ func (c *clusterResource) Create(ctx context.Context, req resource.CreateRequest
 					},
 				},
 			},
+			AllowedCidrs: allowedCIDRs,
 		},
 	})
 	if err != nil {
@@ -501,6 +527,9 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"kubeconfig": schema.SingleNestedAttribute{
 				Computed:    true,
 				Description: "Cluster kubeconfig. Should be used with kubectl to interact with the cluster.",
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 				Attributes: map[string]schema.Attribute{
 					"raw": schema.StringAttribute{
 						Computed:    true,
@@ -529,6 +558,9 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"metadata": schema.SingleNestedAttribute{
 				Computed:    true,
 				Description: "Cluster metadata.",
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.UseStateForUnknown(),
+				},
 				Attributes: map[string]schema.Attribute{
 					"openstack_project_id": schema.StringAttribute{
 						Computed:    true,
@@ -539,6 +571,14 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 			"router_ip": schema.StringAttribute{
 				Computed:    true,
 				Description: "Address of the cluster gateway.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"allowed_cidrs": schema.ListAttribute{
+				Optional:    true,
+				Description: "List of allowed CIDRs for the cluster. If empty, all CIDRs are allowed.",
+				ElementType: types.StringType,
 			},
 		},
 	}
@@ -589,6 +629,24 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 
 	klaster.Version.Id = versions.GetItems()[0].GetId()
 
+	if request.AllowedCIDRs.IsNull() || request.AllowedCIDRs.IsUnknown() {
+		klaster.AllowedCidrs = nil
+	}
+
+	if !request.AllowedCIDRs.IsNull() && !request.AllowedCIDRs.IsUnknown() {
+		var allowedCIDRs []string
+		var allowedCIDRsElems []types.String
+		resp.Diagnostics.Append(request.AllowedCIDRs.ElementsAs(ctx, &allowedCIDRsElems, false)...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		for _, el := range allowedCIDRsElems {
+			allowedCIDRs = append(allowedCIDRs, el.ValueString())
+		}
+
+		klaster.AllowedCidrs = allowedCIDRs
+	}
+
 	_, err = cli.UpdateCluster(ctx, &clusterservice.UpdateClusterRequest{
 		ClusterId: clusterID,
 		Update:    klaster,
@@ -597,6 +655,10 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("failde to update cluster", err.Error())
 		return
 	}
+
+	// the backend reports no CIDRs identically for an empty list and for none at
+	// all, so the planned value decides which of the two the state keeps
+	current.AllowedCIDRs = request.AllowedCIDRs
 
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()

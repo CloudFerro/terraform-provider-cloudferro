@@ -32,6 +32,10 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
 - `name` (String) Name of the cluster.
 - `version` (String) Kubernetes version.
 
+### Optional
+
+- `allowed_cidrs` (List of String) List of allowed CIDRs for the cluster. If empty, all CIDRs are allowed.
+
 ### Read-Only
 
 - `id` (String) Id of the cluster.
