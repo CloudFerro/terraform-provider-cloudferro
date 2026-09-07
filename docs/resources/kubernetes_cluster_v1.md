@@ -18,8 +18,11 @@ resource "cloudferro_kubernetes_cluster_v1" "cluster" {
     flavor = "eo2a.2xlarge"
     size   = 5
   }
-  name    = "my cluster"
+  name    = "my-cluster"
   version = "1.30.10"
+  allowed_cidrs = [
+    "0.0.0.0/0",
+  ]
 }
 ```
 

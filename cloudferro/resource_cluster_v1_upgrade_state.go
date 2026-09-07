@@ -86,6 +86,7 @@ func (c *clusterResource) UpgradeState(ctx context.Context) map[int64]resource.S
 					Kubeconfig:   types.ObjectNull(kubeconfigType),
 					Metadata:     prior.Metadata,
 					RouterIP:     prior.RouterIP,
+					AllowedCIDRs: types.ListNull(types.StringType),
 				}
 
 				if raw := prior.Kubeconfig.ValueString(); raw != "" {

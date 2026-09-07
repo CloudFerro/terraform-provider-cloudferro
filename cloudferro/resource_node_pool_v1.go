@@ -163,6 +163,8 @@ func refreshNodePoolState(ctx context.Context, cli *grpc.ClientConn, state *node
 		return diags
 	}
 
+	tflog.Debug(ctx, "received response from backend", map[string]any{"nodePool": nodePool})
+
 	state.Status = types.StringValue(nodePool.GetStatus())
 	state.Flavor = types.StringValue(nodePool.GetMachineSpec().GetName())
 	state.Name = types.StringValue(nodePool.GetName())

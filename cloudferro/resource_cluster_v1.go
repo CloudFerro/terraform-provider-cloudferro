@@ -174,7 +174,7 @@ func (c *clusterResource) refreshClusterState(ctx context.Context, state *cluste
 	}
 
 	if klaster.GetStatus() == "Running" {
-		if state.Kubeconfig.IsNull() {
+		if state.Kubeconfig.IsNull() || kubeconfigExpired(state.Kubeconfig) {
 			files, err := clusterCli.GetClusterFiles(ctx, &clusterservice.GetClusterFilesRequest{
 				ClusterId: clusterID,
 			})
@@ -528,7 +528,7 @@ func (c *clusterResource) Schema(ctx context.Context, req resource.SchemaRequest
 				Computed:    true,
 				Description: "Cluster kubeconfig. Should be used with kubectl to interact with the cluster.",
 				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.UseStateForUnknown(),
+					kubeconfigModifier{},
 				},
 				Attributes: map[string]schema.Attribute{
 					"raw": schema.StringAttribute{
@@ -686,6 +686,23 @@ func (c *clusterResource) Update(ctx context.Context, req resource.UpdateRequest
 			continue
 		}
 	}
+}
+
+// kubeconfigExpired reports whether the client certificate kept in state has
+// passed its expiry. A kubeconfig that cannot be parsed is reported as expired
+// so that it gets replaced with a usable one.
+func kubeconfigExpired(config types.Object) bool {
+	clientCert, ok := config.Attributes()["client_certificate"].(types.String)
+	if !ok || clientCert.IsNull() || clientCert.IsUnknown() {
+		return true
+	}
+
+	notAfter, err := kubeconfig.ClientCertNotAfter(clientCert.ValueString())
+	if err != nil {
+		return true
+	}
+
+	return notAfter.Before(time.Now())
 }
 
 func kubeconfigFromConfig(raw string) (*clusterKubeconfig, error) {
