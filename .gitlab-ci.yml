@@ -5,13 +5,18 @@ stages:
 variables:
   PROVIDER_VERSION: "0.0.1"
 
+.test_rules: &test_rules
+  - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  - if: $CI_PIPELINE_SOURCE == "schedule"
+  - if: $CI_PIPELINE_SOURCE == "pipeline"
+
 build:
   image: golang:1.24
   stage: build
   tags:
     - kubernetes-waw3-2-general-01-staging
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  rules: *test_rules
   script:
     - go env -w GOPRIVATE=gitlab.cloudferro.com
     - echo -e "machine gitlab.cloudferro.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
@@ -34,8 +39,7 @@ qa_tests:
     PROVIDER_PROJECT_ID: "$CI_PROJECT_ID"
     PROVIDER_BUILD_JOB_ID: $BUILD_JOB_ID
     TEST_TYPE: "terraform_gitlab"
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  rules: *test_rules
   trigger:
     project: "k8s/managed-k8s"
     branch: "master"
