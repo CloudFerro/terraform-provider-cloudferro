@@ -31,18 +31,16 @@ build:
     reports:
       dotenv: build.env
 
+include:
+  - component: $CI_SERVER_FQDN/k8s/managed-k8s/run-tests@~latest
+    inputs:
+      job_name: qa_tests
+      test_type: terraform_gitlab
+      needs:
+        - job: build
+      rules: *test_rules
+
 qa_tests:
-  stage: qa-tests
-  needs:
-    - job: build
   variables:
     PROVIDER_PROJECT_ID: "$CI_PROJECT_ID"
     PROVIDER_BUILD_JOB_ID: $BUILD_JOB_ID
-    TEST_TYPE: "terraform_gitlab"
-  rules: *test_rules
-  trigger:
-    project: "k8s/managed-k8s"
-    branch: "master"
-    strategy: depend
-    forward:
-      pipeline_variables: true
