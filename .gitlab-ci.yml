@@ -1,4 +1,5 @@
 stages:
+  - lint
   - build
   - qa-tests
 
@@ -10,6 +11,19 @@ variables:
   - if: $CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   - if: $CI_PIPELINE_SOURCE == "schedule"
   - if: $CI_PIPELINE_SOURCE == "pipeline"
+
+golangci-lint:
+  image: golangci/golangci-lint:v2.1.6
+  stage: lint
+  tags:
+    - kubernetes-waw3-2-general-01-staging
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - go env -w GOPRIVATE=gitlab.cloudferro.com
+    - echo -e "machine gitlab.cloudferro.com\nlogin gitlab-ci-token\npassword ${CI_JOB_TOKEN}" > ~/.netrc
+    - golangci-lint run
 
 build:
   image: golang:1.24

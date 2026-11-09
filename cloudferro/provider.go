@@ -274,7 +274,7 @@ func (p *CloudFerroProvider) Configure(c context.Context, req provider.Configure
 
 	if cert != "" {
 		var certData []byte
-		certData, err = os.ReadFile(cert)
+		certData, err = os.ReadFile(cert) //nolint:gosec // path comes from user-supplied server_cert config
 		if err != nil {
 			resp.Diagnostics.AddError("failed to configure provider", fmt.Sprintf("failed to load certificate: %v", err))
 			return
